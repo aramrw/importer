@@ -555,7 +555,7 @@ dependencies = [
  "thiserror 2.0.12",
  "unicode-normalization",
  "unicode-segmentation",
- "wana_kana 4.0.0",
+ "wana_kana",
 ]
 
 [[package]]
@@ -1634,7 +1634,6 @@ dependencies = [
  "compact_str",
  "deinflector",
  "derivative",
- "derive-where",
  "derive_more 1.0.0",
  "fancy-regex",
  "getset",
@@ -1655,11 +1654,8 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.12",
  "tracing",
- "unicode-normalization",
- "unicode-segmentation",
  "url",
  "uuid",
- "wana_kana 3.0.0",
  "zip",
 ]
 
@@ -3370,17 +3366,6 @@ checksum = "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
 dependencies = [
  "same-file",
  "winapi-util",
-]
-
-[[package]]
-name = "wana_kana"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "477976a5c56fb7b014795df5a2ce08d2de8bcd4d5980844c5bd3978a7fd1c30b"
-dependencies = [
- "fnv",
- "itertools",
- "lazy_static",
 ]
 
 [[package]]

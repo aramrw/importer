@@ -30,26 +30,26 @@ macro_rules! to_variant {
     };
 }
 
-impl DictionarySet for IndexSet<String> {
-    fn has(&self, value: &str) -> bool {
-        self.contains(value)
-    }
-}
-impl DictionarySet for &IndexSet<String> {
-    fn has(&self, value: &str) -> bool {
-        self.contains(value)
-    }
-}
-impl<V: Send + Sync> DictionarySet for IndexMap<String, V> {
-    fn has(&self, value: &str) -> bool {
-        self.contains_key(value)
-    }
-}
-impl<V: Send + Sync> DictionarySet for &IndexMap<String, V> {
-    fn has(&self, value: &str) -> bool {
-        self.contains_key(value)
-    }
-}
+// impl DictionarySet for IndexSet<String> {
+//     fn has(&self, value: &str) -> bool {
+//         self.contains(value)
+//     }
+// }
+// impl DictionarySet for &IndexSet<String> {
+//     fn has(&self, value: &str) -> bool {
+//         self.contains(value)
+//     }
+// }
+// impl<V: Send + Sync> DictionarySet for IndexMap<String, V> {
+//     fn has(&self, value: &str) -> bool {
+//         self.contains_key(value)
+//     }
+// }
+// impl<V: Send + Sync> DictionarySet for &IndexMap<String, V> {
+//     fn has(&self, value: &str) -> bool {
+//         self.contains_key(value)
+//     }
+// }
 
 // pub static DB_MODELS: LazyLock<Models> = LazyLock::new(|| {
 //     let mut models = Models::new();
@@ -838,15 +838,9 @@ pub struct DatabaseDictData {
     pub dictionary_options: DictionaryOptions,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum Queries<'a, Q: AsRef<str>> {
-    Exact(&'a [Q]),
-    StartsWith(&'a [Q]),
-}
-
-pub trait DictionarySet: Sync + Send {
-    fn has(&self, value: &str) -> bool;
-}
+// pub trait DictionarySet: Sync + Send {
+//     fn has(&self, value: &str) -> bool;
+// }
 
 // native_db imports are fine
 use native_db::{

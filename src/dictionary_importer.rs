@@ -1,5 +1,5 @@
 use crate::dictionary_data::{
-    DictionaryDataTag, Index, TermGlossaryImage, TermMeta, dictionary_data_util,
+    DictionaryDataTag, TermGlossaryImage, TermMeta, YomichanIndexFile, dictionary_data_util,
 };
 use crate::dictionary_database::{
     DatabaseDictData, DatabaseKanjiEntry, DatabaseMetaFrequency, DatabaseMetaMatchType,
@@ -145,7 +145,7 @@ pub enum DictionarySummaryError {
 
 impl DictionarySummary {
     fn new(
-        index: Index,
+        index: YomichanIndexFile,
         prefix_wildcards_supported: bool,
         details: SummaryDetails,
     ) -> Result<Self, DictionarySummaryError> {
@@ -156,7 +156,7 @@ impl DictionarySummary {
             styles,
             yomitan_version,
         } = details;
-        let Index {
+        let YomichanIndexFile {
             title,
             revision,
             sequenced,
@@ -445,7 +445,7 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
         &mut term_bank_paths,
     )?;
 
-    let index: Index = convert_index_file(index_path)?;
+    let index: YomichanIndexFile = convert_index_file(index_path)?;
     let dict_name = index.title.clone();
     // check if dict exists before continuing
     if current_profile
@@ -575,12 +575,12 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
     })
 }
 
-fn convert_index_file(outpath: PathBuf) -> Result<Index, ImportError> {
+fn convert_index_file(outpath: PathBuf) -> Result<YomichanIndexFile, ImportError> {
     let index_str = fs::read_to_string(&outpath).map_err(|e| DictionaryFileError::File {
         outpath,
         reason: e.to_string(),
     })?;
-    let index: Index = serde_json::from_str(&index_str)?;
+    let index: YomichanIndexFile = serde_json::from_str(&index_str)?;
     Ok(index)
 }
 
@@ -813,30 +813,27 @@ fn read_dir_helper<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod importer_tests {
-    use crate::{
-        dictionary_importer::import_dictionary,
-        settings::YomichanOptions,
-    };
+    use crate::{dictionary_importer::import_dictionary, settings::YomichanOptions};
 
     #[test]
     fn dict() {
-        // #[cfg(target_os = "linux")]
-        // let guard = pprof::ProfilerGuardBuilder::default()
-        //     .frequency(1000)
-        //     .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-        //     .build()
-        //     .unwrap();
+        #[cfg(target_os = "linux")]
+        let guard = pprof::ProfilerGuardBuilder::default()
+            .frequency(1000)
+            .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+            .build()
+            .unwrap();
 
         let options = YomichanOptions::new();
         let current_profile = options.get_current_profile().unwrap();
         let path = std::path::Path::new("./dictionaries/kotobankesjp");
-        let data: crate::dictionary_database::DatabaseDictData = import_dictionary(path, current_profile).unwrap();
-        dbg!(data);
+        let data: crate::dictionary_database::DatabaseDictData =
+            import_dictionary(path, current_profile).unwrap();
 
-        // #[cfg(target_os = "linux")]
-        // if let Ok(report) = guard.report().build() {
-        //     let file = std::fs::File::create("flamegraph.svg").unwrap();
-        //     report.flamegraph(file).unwrap();
-        // };
+        #[cfg(target_os = "linux")]
+        if let Ok(report) = guard.report().build() {
+            let file = std::fs::File::create("flamegraph.svg").unwrap();
+            report.flamegraph(file).unwrap();
+        };
     }
 }

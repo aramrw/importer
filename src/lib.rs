@@ -6,3 +6,4 @@ mod structured_content;
 mod test_utils; 
 mod ptr;
 mod errors;
+mod utils;
