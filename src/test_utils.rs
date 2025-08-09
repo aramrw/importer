@@ -2,6 +2,7 @@ use std::{
     path::PathBuf,
     sync::LazyLock,
 };
+use compact_str::CompactString;
 use tempfile::{TempDir, tempdir_in};
 
 pub(crate) struct TestPaths {
@@ -58,23 +59,23 @@ where
 {
     let duration = inst.elapsed();
     #[allow(unused_assignments)]
-    let mut time = String::new();
+    let mut time = CompactString::default();
     {
         let dur_sec = duration.as_secs();
         let dur_mill = duration.as_millis();
         let dur_nan = duration.as_nanos();
         if dur_sec == 0 {
             if dur_mill == 0 {
-                time = format!("{dur_mill}ns");
+                time = CompactString::from(format!("{dur_mill}ns"));
             } else {
-                time = format!("{dur_nan}ms");
+                time = CompactString::from(format!("{dur_nan}ms"));
             }
         } else if dur_sec > 60 {
             let min = dur_sec / 60;
             let sec = dur_sec % 60;
-            time = format!("{min}m{sec}s");
+            time = CompactString::from(format!("{min}m{sec}s"));
         } else {
-            time = format!("{dur_sec}s");
+            time = CompactString::from(format!("{dur_sec}s"));
         }
     }
     println!("{print:?} files");

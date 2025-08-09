@@ -1,4 +1,5 @@
 use std::{fmt, hash::Hash, marker::PhantomData};
+use compact_str::{CompactString, ToCompactString};
 
 use indexmap::IndexMap;
 use serde::{
@@ -17,7 +18,7 @@ pub struct StructuredContent {
     /// This should _always_ be `"type": "structured-content"` in the file.
     /// If not, the dictionary is not valid.
     #[serde(rename = "type")]
-    pub content_type: String,
+    pub content_type: CompactString,
     /// Contains the main content of the entry.
     /// _(see: [`ContentMatchType`] )_.
     ///
@@ -39,7 +40,7 @@ pub enum ContentMatchType {
     /// See: [`HtmlTag`].
     ///
     Content(Vec<ContentMatchType>),
-    String(String),
+    String(CompactString),
 }
 
 impl<'de> Deserialize<'de> for ContentMatchType {
@@ -76,7 +77,7 @@ impl<'de> Deserialize<'de> for ContentMatchType {
         // Try as String.
         if value.is_string() {
             match String::deserialize(value.clone()) {
-                Ok(s) => return Ok(ContentMatchType::String(s)),
+                Ok(s) => return Ok(ContentMatchType::String(s.into())),
                 Err(e) => errors.push(format!("[Attempted as String] {e}")),
             }
         }
@@ -102,9 +103,9 @@ impl<'de> Deserialize<'de> for ContentMatchType {
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub struct TermGlossaryContentGroup {
     // this is used for programs that cannot render html
-    pub plain_text: String,
+    pub plain_text: CompactString,
     // this is used for programs that can render html (we ignore it for now)
-    pub html: Option<String>,
+    pub html: Option<CompactString>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
@@ -133,7 +134,7 @@ impl From<TermGlossary> for TermGlossaryGroupType {
                     _ => unreachable!(),
                 };
                 let group = TermGlossaryContentGroup {
-                    plain_text,
+                    plain_text: plain_text.into(),
                     html: None,
                 };
                 Self::Content(group)
@@ -146,15 +147,15 @@ impl From<TermGlossaryContent> for TermGlossaryContentGroup {
     fn from(value: TermGlossaryContent) -> Self {
         let plain_text = value.to_plain_text();
         Self {
-            plain_text,
+            plain_text: plain_text.into(),
             html: None,
         }
     }
 }
 
 impl TermGlossaryContent {
-    pub fn to_plain_text(&self) -> String {
-        let mut buffer = String::new();
+    pub fn to_plain_text(&self) -> CompactString {
+        let mut buffer = CompactString::default();
         match self {
             Self::String(s) => {
                 buffer.push_str(s);
@@ -163,10 +164,10 @@ impl TermGlossaryContent {
                 Self::render_tagged_content(tagged_content, &mut buffer);
             }
         }
-        buffer.trim().to_string()
+        buffer.trim().to_compact_string()
     }
 
-    fn render_tagged_content(tagged: &TaggedContent, buffer: &mut String) {
+    fn render_tagged_content(tagged: &TaggedContent, buffer: &mut CompactString) {
         match tagged {
             TaggedContent::Text { text } => {
                 buffer.push_str(text);
@@ -175,7 +176,7 @@ impl TermGlossaryContent {
                 if let Some(alt) = &image_element.alt {
                     buffer.push_str(alt);
                 } else {
-                    buffer.push_str(&format!("[Image: {}]", image_element.path));
+                    buffer.push_str(&CompactString::from(format!("[Image: {}]", image_element.path)));
                 }
             }
             // This is the crucial part that contains the recursive tree.
@@ -187,7 +188,7 @@ impl TermGlossaryContent {
 
     /// Helper that recursively renders any `ContentMatchType`.
     /// This is the main recursive dispatcher.
-    fn render_content_match_type(content: &ContentMatchType, buffer: &mut String) {
+    fn render_content_match_type(content: &ContentMatchType, buffer: &mut CompactString) {
         match content {
             ContentMatchType::String(s) => {
                 buffer.push_str(s);
@@ -204,7 +205,7 @@ impl TermGlossaryContent {
     }
 
     /// Renders a single, specific `Element` enum variant, applying formatting rules.
-    fn render_element(element: &Element, buffer: &mut String) {
+    fn render_element(element: &Element, buffer: &mut CompactString) {
         // --- 1. PRE-CONTENT FORMATTING (e.g., adding newlines for blocks) ---
         // We check the tag to see if it's a block-level element.
         let is_block = match element {
@@ -269,7 +270,7 @@ impl TermGlossaryContent {
                 if let Some(alt) = &e.alt {
                     buffer.push_str(alt);
                 } else {
-                    buffer.push_str(&format!("[Image: {}]", e.path));
+                    buffer.push_str(&CompactString::from(format!("[Image: {}]", e.path)));
                 }
             }
         }
@@ -286,8 +287,8 @@ impl TermGlossaryContent {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermGlossaryDeinflection {
-    pub form_of: String,
-    pub rules: Vec<String>,
+    pub form_of: CompactString,
+    pub rules: Vec<CompactString>,
 }
 
 impl<'de> Deserialize<'de> for TermGlossary {
@@ -344,7 +345,7 @@ impl<'de> Deserialize<'de> for TermGlossary {
 #[serde(untagged)]
 pub enum TermGlossaryContent {
     Tagged(TaggedContent),
-    String(String),
+    String(CompactString),
 }
 
 impl<'de> Deserialize<'de> for TermGlossaryContent {
@@ -369,7 +370,7 @@ impl<'de> Deserialize<'de> for TermGlossaryContent {
         // Step 3: Try to deserialize as `String`. This is where your error likely originates.
         // If `value` is a sequence, this will fail with "invalid type: sequence, expected a string".
         let string_error = match String::deserialize(value.clone()) {
-            Ok(s) => return Ok(TermGlossaryContent::String(s)),
+            Ok(s) => return Ok(TermGlossaryContent::String(s.into())),
             Err(e) => e.to_string(), // Keep the error message
         };
 
@@ -389,7 +390,7 @@ impl<'de> Deserialize<'de> for TermGlossaryContent {
 #[serde(tag = "type")]
 pub enum TaggedContent {
     #[serde(rename = "text")]
-    Text { text: String },
+    Text { text: CompactString },
     #[serde(rename = "img")]
     Image(Box<ImageElement>),
     #[serde(rename = "structured-content")]
@@ -432,7 +433,7 @@ impl<'de> Deserialize<'de> for TaggedContent {
                         let text: String = seq
                             .next_element()?
                             .ok_or_else(|| de::Error::invalid_length(1, &"a text payload"))?;
-                        TaggedContent::Text { text }
+                        TaggedContent::Text { text: text.into() }
                     }
                     "img" => {
                         let image_payload: Box<ImageElement> = seq
@@ -478,7 +479,7 @@ impl<'de> Deserialize<'de> for TaggedContent {
                 #[serde(tag = "type")]
                 enum Helper {
                     #[serde(rename = "text")]
-                    Text { text: String },
+                    Text { text: CompactString },
                     #[serde(rename = "img")]
                     Image(Box<ImageElement>),
                     #[serde(rename = "structured-content")]
@@ -508,21 +509,21 @@ impl<'de> Deserialize<'de> for TaggedContent {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct TermGlossaryText {
-    pub text: String,
+    pub text: CompactString,
 }
 
 /// The 'header', and `structured-content`
 /// of a `term_bank_${i}.json` entry item.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TermEntryItem {
-    pub expression: String,
-    pub reading: String,
-    pub def_tags: Option<String>,
-    pub rules: String,
+    pub expression: CompactString,
+    pub reading: CompactString,
+    pub def_tags: Option<CompactString>,
+    pub rules: CompactString,
     pub score: i128,
     pub structured_content: Vec<TermGlossary>,
     pub sequence: i128,
-    pub term_tags: String,
+    pub term_tags: CompactString,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -664,22 +665,22 @@ pub enum SizeUnits {
 pub struct StructuredContentStyle {
     font_style: Option<FontStyle>,
     font_weight: Option<FontWeight>,
-    font_size: Option<String>,
-    color: Option<String>,
-    background: Option<String>,
-    background_color: Option<String>,
+    font_size: Option<CompactString>,
+    color: Option<CompactString>,
+    background: Option<CompactString>,
+    background_color: Option<CompactString>,
     text_decoration_line: Option<TextDecorationLineOrNone>,
     text_decoration_style: Option<TextDecorationStyle>,
-    text_decoration_color: Option<String>,
-    border_color: Option<String>,
-    border_style: Option<String>,
-    border_radius: Option<String>,
-    border_width: Option<String>,
-    clip_path: Option<String>,
+    text_decoration_color: Option<CompactString>,
+    border_color: Option<CompactString>,
+    border_style: Option<CompactString>,
+    border_radius: Option<CompactString>,
+    border_width: Option<CompactString>,
+    clip_path: Option<CompactString>,
     vertical_align: Option<VerticalAlign>,
     text_align: Option<TextAlign>,
-    text_emphasis: Option<String>,
-    text_shadow: Option<String>,
+    text_emphasis: Option<CompactString>,
+    text_shadow: Option<CompactString>,
     margin: Option<NumberOrString>,
     margin_top: Option<NumberOrString>,
     margin_left: Option<NumberOrString>,
@@ -691,9 +692,9 @@ pub struct StructuredContentStyle {
     padding_right: Option<NumberOrString>,
     padding_bottom: Option<NumberOrString>,
     word_break: Option<WordBreak>,
-    white_space: Option<String>,
-    cursor: Option<String>,
-    list_style_type: Option<String>,
+    white_space: Option<CompactString>,
+    cursor: Option<CompactString>,
+    list_style_type: Option<CompactString>,
 }
 
 // daijisen: ~6.35s WITHOUT custom deserialization.
@@ -851,7 +852,7 @@ pub struct LineBreak {
     /// The `LineBreak`' tag is:
     /// [`HtmlTag::Break`] | `"br"`.
     pub tag: HtmlTag,
-    data: Option<IndexMap<String, String>>,
+    data: Option<IndexMap<CompactString, CompactString>>,
 }
 
 #[skip_serializing_none]
@@ -872,7 +873,7 @@ pub struct UnstyledElement {
     pub content: Option<ContentMatchType>,
     pub data: Option<IndexMap<String, String>>,
     /// Defines the language of an element in the format defined by RFC 5646.
-    lang: Option<String>,
+    lang: Option<CompactString>,
 }
 
 #[skip_serializing_none]
@@ -890,7 +891,7 @@ pub struct TableElement {
     pub row_span: Option<u16>,
     pub style: Option<StructuredContentStyle>,
     /// Defines the language of an element in the format defined by RFC 5646.
-    lang: Option<String>,
+    lang: Option<CompactString>,
 }
 
 impl<'de> Deserialize<'de> for TableElement {
@@ -980,22 +981,22 @@ impl<'de> Deserialize<'de> for TableElement {
                 struct Helper {
                     tag: HtmlTag,
                     content: Option<ContentMatchType>,
-                    data: Option<IndexMap<String, String>>,
+                    data: Option<IndexMap<CompactString, CompactString>>,
                     col_span: Option<u16>,
                     row_span: Option<u16>,
                     style: Option<StructuredContentStyle>,
-                    lang: Option<String>,
+                    lang: Option<CompactString>,
                 }
 
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
                 Ok(TableElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data,
+                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     col_span: helper.col_span,
                     row_span: helper.row_span,
                     style: helper.style,
-                    lang: helper.lang,
+                    lang: helper.lang.map(Into::into),
                 })
             }
         }
@@ -1023,10 +1024,10 @@ pub struct StyledElement {
     pub data: Option<IndexMap<String, String>>,
     pub style: Option<StructuredContentStyle>,
     /// Hover text for the element.
-    pub title: Option<String>,
+    pub title: Option<CompactString>,
     pub open: Option<bool>,
     /// Defines the language of an element in the format defined by RFC 5646.
-    lang: Option<String>,
+    lang: Option<CompactString>,
 }
 
 /// A generic visitor that can deserialize a map directly, or convert a
@@ -1130,7 +1131,7 @@ pub struct LinkElement {
     /// The URL for the link.
     ///
     /// URLs starting with a `?` are treated as internal links to other dictionary content.
-    pub href: String,
+    pub href: CompactString,
     /// Defines the language of an element in the format defined by RFC 5646.
     ///
     ///yomichan_rs will currently only support `ja` & `ja-JP`.
@@ -1141,7 +1142,7 @@ pub struct LinkElement {
 #[serde(untagged)]
 pub enum NumberOrString {
     Number(f64),
-    String(String),
+    String(CompactString),
 }
 
 #[skip_serializing_none]
@@ -1154,14 +1155,14 @@ pub struct ImageElement {
     /// The vertical alignment of the image.
     pub vertical_align: Option<VerticalAlign>,
     /// Shorthand for border width, style, and color.
-    pub border: Option<String>,
+    pub border: Option<CompactString>,
     /// Roundness of the corners of the image's outer border edge.
     pub border_radius: Option<String>,
     /// The units for the width and height.
     pub size_units: Option<SizeUnits>,
     pub data: Option<IndexMap<String, String>>,
     /// Path to the image file in the archive.
-    pub path: String,
+    pub path: CompactString,
     /// Preferred width of the image.
     pub width: Option<f32>,
     /// Preferred height of the image.
@@ -1173,11 +1174,11 @@ pub struct ImageElement {
     /// This is only used in the internal database.
     pub preferred_height: Option<f32>,
     /// Hover text for the image.
-    pub title: Option<String>,
+    pub title: Option<CompactString>,
     /// Alt text for the image.
-    pub alt: Option<String>,
+    pub alt: Option<CompactString>,
     /// Description of the image.
-    pub description: Option<String>,
+    pub description: Option<CompactString>,
     /// Whether or not the image should appear pixelated at sizes larger than the image's native resolution.
     pub pixelated: Option<bool>,
     /// Controls how the image is rendered. The value of this field supersedes the pixelated field.
@@ -1235,22 +1236,22 @@ impl<'de> Deserialize<'de> for StyledElement {
                 struct Helper {
                     tag: HtmlTag,
                     content: Option<ContentMatchType>,
-                    data: Option<IndexMap<String, String>>,
+                    data: Option<IndexMap<CompactString, CompactString>>,
                     style: Option<StructuredContentStyle>,
                     title: Option<String>,
                     open: Option<bool>,
-                    lang: Option<String>,
+                    lang: Option<CompactString>,
                 }
 
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
                 Ok(StyledElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data,
+                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     style: helper.style,
-                    title: helper.title,
+                    title: helper.title.map(Into::into),
                     open: helper.open,
-                    lang: helper.lang,
+                    lang: helper.lang.map(Into::into),
                 })
             }
 
@@ -1292,7 +1293,7 @@ impl<'de> Deserialize<'de> for StyledElement {
                     // Is it a string that isn't content yet? -> `title`
                     if let Some(s) = value.as_str() {
                         if title.is_none() {
-                            title = Some(s.to_string());
+                            title = Some(CompactString::from(s));
                             // Don't assume it's title, could be content. We'll let content take priority.
                         }
                     }
@@ -1384,15 +1385,15 @@ impl<'de> Deserialize<'de> for UnstyledElement {
                 struct Helper {
                     tag: HtmlTag,
                     content: Option<ContentMatchType>,
-                    data: Option<IndexMap<String, String>>,
-                    lang: Option<String>,
+                    data: Option<IndexMap<CompactString, CompactString>>,
+                    lang: Option<CompactString>,
                 }
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
                 Ok(UnstyledElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data,
-                    lang: helper.lang,
+                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    lang: helper.lang.map(Into::into),
                 })
             }
 
@@ -1459,14 +1460,14 @@ impl<'de> Deserialize<'de> for LinkElement {
                     tag: HtmlTag,
                     content: Option<ContentMatchType>,
                     href: String,
-                    lang: Option<String>,
+                    lang: Option<CompactString>,
                 }
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
                 Ok(LinkElement {
                     tag: helper.tag,
                     content: helper.content,
-                    href: helper.href,
-                    lang: helper.lang,
+                    href: helper.href.into(),
+                    lang: helper.lang.map(Into::into),
                 })
             }
 
@@ -1487,7 +1488,7 @@ impl<'de> Deserialize<'de> for LinkElement {
                     if let Some(s) = value.as_str() {
                         if s.starts_with('?') || s.starts_with("http") {
                             if href.is_none() {
-                                href = Some(s.to_string());
+                                href = Some(CompactString::from(s));
                             }
                             continue;
                         }
@@ -1538,9 +1539,9 @@ impl<'de> Deserialize<'de> for ImageElement {
                     content: Option<()>,
                     vertical_align: Option<VerticalAlign>,
                     border: Option<String>,
-                    border_radius: Option<String>,
+                    border_radius: Option<CompactString>,
                     size_units: Option<SizeUnits>,
-                    data: Option<IndexMap<String, String>>,
+                    data: Option<IndexMap<CompactString, CompactString>>,
                     path: String,
                     width: Option<f32>,
                     height: Option<f32>,
@@ -1562,18 +1563,18 @@ impl<'de> Deserialize<'de> for ImageElement {
                     tag: helper.tag,
                     content: helper.content,
                     vertical_align: helper.vertical_align,
-                    border: helper.border,
-                    border_radius: helper.border_radius,
+                    border: helper.border.map(Into::into),
+                    border_radius: helper.border_radius.map(Into::into),
                     size_units: helper.size_units,
-                    data: helper.data,
-                    path: helper.path,
+                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    path: helper.path.into(),
                     width: helper.width,
                     height: helper.height,
                     preferred_width: helper.preferred_width,
                     preferred_height: helper.preferred_height,
-                    title: helper.title,
-                    alt: helper.alt,
-                    description: helper.description,
+                    title: helper.title.map(Into::into),
+                    alt: helper.alt.map(Into::into),
+                    description: helper.description.map(Into::into),
                     pixelated: helper.pixelated,
                     image_rendering: helper.image_rendering,
                     appearance: helper.appearance,
@@ -1596,12 +1597,12 @@ impl<'de> Deserialize<'de> for ImageElement {
 
                 // The rest of the fields have a fixed order in this compact format.
                 let size_units: Option<SizeUnits> = seq.next_element()?.unwrap_or(None);
-                let path: String = seq
+                let path: CompactString = seq
                     .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(2, &self))?;
                 let width: Option<f32> = seq.next_element()?.unwrap_or(None);
                 let height: Option<f32> = seq.next_element()?.unwrap_or(None);
-                let alt: Option<String> = seq.next_element()?.unwrap_or(None);
+                let alt: Option<CompactString> = seq.next_element()?.unwrap_or(None);
                 let appearance: Option<ImageAppearance> = seq.next_element()?.unwrap_or(None);
                 let pixelated: Option<bool> = seq.next_element()?.unwrap_or(None);
                 let collapsed: Option<bool> = seq.next_element()?.unwrap_or(None);
@@ -1661,12 +1662,12 @@ impl<'de> Deserialize<'de> for LineBreak {
                 #[serde(rename_all = "camelCase")]
                 struct Helper {
                     tag: HtmlTag,
-                    data: Option<IndexMap<String, String>>,
+                    data: Option<IndexMap<CompactString, CompactString>>,
                 }
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
                 Ok(LineBreak {
                     tag: helper.tag,
-                    data: helper.data,
+                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                 })
             }
 
@@ -1679,7 +1680,7 @@ impl<'de> Deserialize<'de> for LineBreak {
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
                 let data: Option<IndexMap<String, String>> = seq.next_element()?.unwrap_or(None);
 
-                Ok(LineBreak { tag, data })
+                Ok(LineBreak { tag, data: data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()) })
             }
         }
 

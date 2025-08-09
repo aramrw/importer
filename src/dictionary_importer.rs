@@ -3,7 +3,7 @@ use crate::dictionary_data::{
 };
 use crate::dictionary_database::{
     DatabaseDictData, DatabaseKanjiEntry, DatabaseMetaFrequency, DatabaseMetaMatchType,
-    DatabaseTermEntry, MediaDataArrayBufferContent,
+    DatabaseTermEntry, DatabaseTermEntryTuple, MediaDataArrayBufferContent,
 };
 use crate::ptr::Ptr;
 use crate::settings::{DictionaryOptions, YomichanProfile};
@@ -32,7 +32,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use super::dictionary_database::{DatabaseTag, DictionaryDatabase};
+use super::dictionary_database::DatabaseTag;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ImportSteps {
@@ -384,28 +384,31 @@ fn extract_dict_zip<P: AsRef<std::path::Path>>(
 
 pub fn import_dictionary<P: AsRef<Path>>(
     zip_path: P,
-    db: &DictionaryDatabase,
     current_profile: Ptr<YomichanProfile>,
-) -> Result<DictionaryOptions, ImportError> {
+) -> Result<DatabaseDictData, ImportError> {
     let data: DatabaseDictData = prepare_dictionary(zip_path, current_profile)?;
-    let rwtx = db.rw_transaction()?;
-    db_rwriter(&rwtx, data.term_list)?;
-    db_rwriter(&rwtx, data.kanji_list)?;
-    db_rwriter(&rwtx, data.tag_list)?;
-    db_rwriter(&rwtx, data.kanji_meta_list)?;
-    {
-        for item in data.term_meta_list {
-            match item {
-                DatabaseMetaMatchType::Frequency(freq) => rwtx.insert(freq)?,
-                DatabaseMetaMatchType::Pitch(pitch) => rwtx.insert(pitch)?,
-                DatabaseMetaMatchType::Phonetic(ipa) => rwtx.insert(ipa)?,
-            }
-        }
-    }
-    db_rwriter(&rwtx, vec![data.summary])?;
 
-    rwtx.commit()?;
-    Ok(data.dictionary_options)
+    // TODO: Slowly remove native_db from this importer
+
+    // let rwtx = db.rw_transaction()?;
+    // db_rwriter(&rwtx, data.term_list)?;
+    // db_rwriter(&rwtx, data.kanji_list)?;
+    // db_rwriter(&rwtx, data.tag_list)?;
+    // db_rwriter(&rwtx, data.kanji_meta_list)?;
+    // {
+    //     for item in data.term_meta_list {
+    //         match item {
+    //             DatabaseMetaMatchType::Frequency(freq) => rwtx.insert(freq)?,
+    //             DatabaseMetaMatchType::Pitch(pitch) => rwtx.insert(pitch)?,
+    //             DatabaseMetaMatchType::Phonetic(ipa) => rwtx.insert(ipa)?,
+    //         }
+    //     }
+    // }
+    // db_rwriter(&rwtx, vec![data.summary])?;
+    //
+    // rwtx.commit()?;
+
+    Ok(data)
 }
 
 fn db_rwriter<L: ToInput>(
@@ -464,11 +467,13 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
         }
     };
 
-    let term_banks: Result<Vec<Vec<DatabaseTermEntry>>, DictionaryFileError> = term_bank_paths
-        .into_par_iter()
-        .map(|path| convert_term_bank_file(path, &dict_name))
-        .collect::<Result<Vec<Vec<DatabaseTermEntry>>, DictionaryFileError>>();
-    let term_list: Vec<DatabaseTermEntry> = match term_banks {
+    let term_banks_result: Result<Vec<Vec<DatabaseTermEntryTuple>>, DictionaryFileError> =
+        term_bank_paths
+            .into_par_iter()
+            .map(|path| convert_term_bank_file(path, &dict_name))
+            .collect();
+
+    let term_list: Vec<DatabaseTermEntryTuple> = match term_banks_result {
         Ok(tl) => tl.into_iter().flatten().collect(),
         Err(e) => {
             return Err(ImportError::Custom(format!(
@@ -653,7 +658,7 @@ fn convert_kanji_bank(
 fn convert_term_bank_file(
     outpath: PathBuf,
     dict_name: &str,
-) -> Result<Vec<DatabaseTermEntry>, DictionaryFileError> {
+) -> Result<Vec<DatabaseTermEntryTuple>, DictionaryFileError> {
     let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
         outpath: outpath.clone(),
         reason: reason.to_string(),
@@ -675,7 +680,7 @@ fn convert_term_bank_file(
 
     // Beginning of each word/phrase/expression (entry)
     // ie: ["headword","reading","","",u128,[{/* main */}]]];
-    let terms: Vec<DatabaseTermEntry> = entries
+    let terms: Vec<DatabaseTermEntryTuple> = entries
         .into_iter()
         .map(|entry| {
             let TermEntryItem {
@@ -691,25 +696,22 @@ fn convert_term_bank_file(
             let id = uuid::Uuid::now_v7().to_string();
             let expression_reverse = rev_str(&expression);
             let reading_reverse = rev_str(&reading);
-            let term = DatabaseTermEntry {
+            DatabaseTermEntryTuple(
                 id,
-                expression,
+                expression.to_string(),
+                reading.to_string(),
                 expression_reverse,
-                reading,
                 reading_reverse,
-                definition_tags: def_tags,
-                rules,
+                def_tags.map(|s| s.to_string()),
+                None, // tags field is not in TermEntryItem
+                rules.to_string(),
                 score,
-                sequence: Some(sequence),
-                term_tags: Some(term_tags),
-                file_path: outpath.clone().to_string_lossy().to_string(),
-                dictionary: dict_name.to_owned(),
-                // instead of pushing the entire tree as it is
-                // create helper functions to parse the tree as a string or html
-                glossary: structured_content.into_iter().map(|sc| sc.into()).collect(),
-                ..Default::default()
-            };
-            term
+                structured_content.into_iter().map(|sc| sc.into()).collect(),
+                Some(sequence),
+                Some(term_tags.to_string()),
+                dict_name.to_owned(),
+                outpath.clone().to_string_lossy().to_string(),
+            )
         })
         .collect();
     Ok(terms)
@@ -811,7 +813,10 @@ fn read_dir_helper<P: AsRef<Path>>(
 
 #[cfg(test)]
 mod importer_tests {
-    use crate::{dictionary_importer::prepare_dictionary, settings::YomichanOptions};
+    use crate::{
+        dictionary_importer::import_dictionary,
+        settings::YomichanOptions,
+    };
 
     #[test]
     fn dict() {
@@ -825,7 +830,8 @@ mod importer_tests {
         let options = YomichanOptions::new();
         let current_profile = options.get_current_profile().unwrap();
         let path = std::path::Path::new("./dictionaries/kotobankesjp");
-        prepare_dictionary(path, current_profile).unwrap();
+        let data: crate::dictionary_database::DatabaseDictData = import_dictionary(path, current_profile).unwrap();
+        dbg!(data);
 
         // #[cfg(target_os = "linux")]
         // if let Ok(report) = guard.report().build() {

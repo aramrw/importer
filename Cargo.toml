@@ -38,6 +38,7 @@ derive-where = { version = "1.5.0", features = ["serde"] }
 derivative = { version = "2.2.0", features = ["use_core"] }
 anki_direct = { path = "../anki_direct", features = ["cache"] }
 tracing = { version = "0.1.41", optional = true }
+compact_str = { version = "0.9", features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
 pprof = { version = "0.13", features = ["flamegraph"] }
