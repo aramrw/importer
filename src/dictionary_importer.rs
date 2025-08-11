@@ -1,9 +1,20 @@
+//! Contains the main logic for importing a Yomichan dictionary.
+
 use crate::dictionary_data::{
-    DictionaryDataTag, TermGlossaryImage, TermMeta, YomichanIndexFile, dictionary_data_util,
+    DictionaryDataTag,
+    TermGlossaryImage,
+    TermMeta,
+    YomichanIndexFile,
+    dictionary_data_util,
 };
 use crate::dictionary_database::{
-    DatabaseDictionaryData, DatabaseKanjiEntry, DatabaseMetaFrequency, DatabaseMetaMatchType,
-    DatabaseTermEntry, DatabaseTermEntryTuple, MediaDataArrayBufferContent,
+    DatabaseDictionaryData,
+    DatabaseKanjiEntry,
+    DatabaseMetaFrequency,
+    DatabaseMetaMatchType,
+    DatabaseTermEntry,
+    DatabaseTermEntryTuple,
+    MediaDataArrayBufferContent,
 };
 use crate::structured_content::TermEntryItem;
 
@@ -27,26 +38,38 @@ use std::{fs, io};
 
 use super::dictionary_database::DatabaseTag;
 
+/// The steps of the import process.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ImportSteps {
+    /// The import process has not started.
     Uninitialized,
+    /// Validating the index file.
     ValidateIndex,
+    /// Validating the schema of the dictionary files.
     ValidateSchema,
+    /// Formatting the dictionary data.
     FormatDictionary,
+    /// Importing media files.
     ImportMedia,
+    /// Importing data files.
     ImportData,
+    /// The import process has completed.
     Completed,
 }
 
+/// The names of the compiled schema files.
 #[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum CompiledSchemaNames {
+    /// A file containing term entries.
     TermBank,
     /// Metadata & information for terms.
     ///
     /// This currently includes `frequency data` and `pitch accent` data.
     TermMetaBank,
+    /// A file containing kanji entries.
     KanjiBank,
+    /// A file containing kanji metadata.
     KanjiMetaBank,
     /// Data file containing tag information for terms and kanji.
     TagBank,
@@ -55,13 +78,15 @@ pub enum CompiledSchemaNames {
 /// The 2 types of frequency dictionaries
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FrequencyMode {
+    /// Frequency is based on occurrence count.
     #[serde(rename = "occurrence-based")]
     OccurrenceBased,
+    /// Frequency is based on rank.
     #[serde(rename = "rank-based")]
     RankBased,
 }
 
-// Final details about the Dictionary and it's import process.
+/// Final details about the Dictionary and it's import process.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DictionarySummary {
     /// Name of the dictionary.
@@ -84,12 +109,17 @@ pub struct DictionarySummary {
     /// For example, scanning `読み` will effectively search for `読み*`
     /// which may bring up additional results such as `読み方`.
     pub prefix_wildcards_supported: bool,
+    /// The counts of the dictionary.
     pub counts: SummaryCounts,
-    /// Creator of the dictionary.
+    /// The styles of the dictionary.
     pub styles: String,
+    /// Whether the dictionary is updatable.
     pub is_updatable: bool,
+    /// The URL of the index file.
     pub index_url: Option<String>,
+    /// The URL to download the dictionary from.
     pub download_url: Option<String>,
+    /// The author of the dictionary.
     pub author: Option<String>,
     /// URL for the source of the dictionary.
     pub url: Option<String>,
@@ -105,8 +135,10 @@ pub struct DictionarySummary {
     pub frequency_mode: Option<FrequencyMode>,
 }
 
+/// An error that can occur when creating a dictionary summary.
 #[derive(thiserror::Error, Debug)]
 pub enum DictionarySummaryError {
+    /// The dictionary is incompatible with the current version of Yomitan.
     #[error(
         "dictionary is incompatible with current version of Yomitan: (${yomitan_version}; minimum required: ${minimum_required_yomitan_version}); dictionary: {dictionary}"
     )]
@@ -115,8 +147,10 @@ pub enum DictionarySummaryError {
         minimum_required_yomitan_version: String,
         dictionary: String,
     },
+    /// The index data is invalid because `is_updatable` is false.
     #[error("invalid index data: `is_updatable` exists but is false")]
     InvalidIndexIsNotUpdatabale,
+    /// The index URL is invalid.
     #[error("index url: {url} is not a valid url\nreason: {err}")]
     InvalidIndexUrl { url: String, err: url::ParseError },
 }
@@ -128,7 +162,7 @@ impl DictionarySummary {
         details: SummaryDetails,
     ) -> Result<Self, DictionarySummaryError> {
         let import_date: DateTime<Local> = Local::now();
-        let SummaryDetails {
+        let SummaryDetails { 
             prefix_wildcard_supported,
             counts,
             styles,
@@ -213,22 +247,33 @@ impl DictionarySummary {
     }
 }
 
+/// The details of a dictionary summary.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SummaryDetails {
+    /// Whether prefix wildcards are supported.
     pub prefix_wildcard_supported: bool,
+    /// The counts of the dictionary.
     pub counts: SummaryCounts,
-    // some kind of styles.css file stuff
+    /// The styles of the dictionary.
     pub styles: String,
+    /// The version of Yomitan.
     pub yomitan_version: String,
 }
 
+/// The counts of a dictionary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SummaryCounts {
+    /// The number of terms.
     pub terms: SummaryItemCount,
+    /// The number of term metadata entries.
     pub term_meta: SummaryMetaCount,
+    /// The number of kanji.
     pub kanji: SummaryItemCount,
+    /// The number of kanji metadata entries.
     pub kanji_meta: SummaryMetaCount,
+    /// The number of tag metadata entries.
     pub tag_meta: SummaryItemCount,
+    /// The number of media files.
     pub media: SummaryItemCount,
 }
 
@@ -266,23 +311,32 @@ impl SummaryCounts {
     }
 }
 
+/// The count of a summary item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SummaryItemCount {
+    /// The total number of items.
     pub total: u16,
 }
 
 impl SummaryItemCount {}
 
+/// The count of a summary metadata item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SummaryMetaCount {
+    /// The total number of items.
     pub total: u16,
+    /// The counts of the metadata types.
     pub meta: MetaCounts,
 }
 
+/// The counts of the metadata types.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub struct MetaCounts {
+    /// The number of frequency metadata entries.
     pub freq: u32,
+    /// The number of pitch metadata entries.
     pub pitch: u32,
+    /// The number of IPA metadata entries.
     pub ipa: u32,
 }
 
@@ -308,12 +362,16 @@ impl MetaCounts {
     }
 }
 
+/// The type of image import.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ImageImportMatchType {
+    /// An image.
     Image,
+    /// An image in structured content.
     StructuredContentImage,
 }
 
+/// A requirement for importing an image.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImageImportRequirement {
     /// This is of type [`ImageImportType::Image`]
@@ -323,6 +381,7 @@ pub struct ImageImportRequirement {
     entry: DatabaseTermEntry,
 }
 
+/// A requirement for importing an image from structured content.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StructuredContentImageImportRequirement {
     /// This is of type [`ImageImportType::StructuredContentImage`]
@@ -332,6 +391,7 @@ pub struct StructuredContentImageImportRequirement {
     entry: DatabaseTermEntry,
 }
 
+/// The context for an import requirement.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportRequirementContext {
     //file_map: ArchiveFileMap,
@@ -339,7 +399,9 @@ pub struct ImportRequirementContext {
 }
 /// Deserializable type mapping a `term_bank_$i.json` file.
 pub type TermBank = Vec<TermEntryItem>;
+/// Deserializable type mapping a `term_meta_bank_$i.json` file.
 pub type TermMetaBank = Vec<TermMeta>;
+/// Deserializable type mapping a `kanji_bank_$i.json` file.
 pub type KanjiBank = Vec<DatabaseKanjiEntry>;
 
 fn extract_dict_zip<P: AsRef<std::path::Path>>(
@@ -360,6 +422,15 @@ fn extract_dict_zip<P: AsRef<std::path::Path>>(
     Ok(temp_dir_path)
 }
 
+/// Imports a Yomichan dictionary from a zip file.
+///
+/// # Arguments
+///
+/// * `zip_path` - The path to the zip file.
+///
+/// # Returns
+///
+/// A `Result` containing the imported dictionary data or an error.
 pub fn import_dictionary<P: AsRef<Path>>(zip_path: P) -> Result<DatabaseDictionaryData, ImportError> {
     let data: DatabaseDictionaryData = prepare_dictionary(zip_path)?;
     Ok(data)
@@ -394,7 +465,7 @@ pub fn prepare_dictionary<P: AsRef<Path>>(zip_path: P) -> Result<DatabaseDiction
     let term_list: Vec<DatabaseTermEntryTuple> = term_bank_paths
         .into_par_iter()
         .map(|path| convert_term_bank_file(path, &dict_name))
-        .collect::<Result<Vec<_>, _>>()?
+        .collect::<Result<Vec<_>, _>>()? 
         .into_iter()
         .flatten()
         .collect();
@@ -543,7 +614,7 @@ fn convert_term_bank_file(
     let entries = match stream.next() {
         Some(Ok(entries)) => entries,
         Some(Err(reason)) => {
-            eprintln!("{outpath:?} failed:\nreason: {reason}");
+            eprintln!( "{outpath:?} failed:\nreason: {reason}");
             return Err(crate::errors::DictionaryFileError::File {
                 outpath,
                 reason: reason.to_string(),
@@ -595,56 +666,6 @@ fn rev_str(expression: &str) -> String {
     expression.chars().rev().collect()
 }
 
-// fn get_string_content(c_match_type: ContentMatchType) -> Vec<String> {
-//     match c_match_type {
-//         ContentMatchType::String(string) => vec![string],
-//         ContentMatchType::Element(element) => handle_content_match_type(vec![*element]),
-//         ContentMatchType::Content(vec) => handle_content_match_type(vec),
-//     }
-// }
-
-// fn handle_content_match_type(content: Vec<ContentMatchType>) -> Vec<String> {
-//     let mut content_strings: Vec<String> = Vec::new();
-//
-//     for e in content {
-//         match e {
-//             Element::UnknownString(string) => content_strings.push(string),
-//             Element::Link(mut element) => {
-//                 if let Some(content) = std::mem::take(&mut element.content) {
-//                     content_strings.extend(get_string_content(content));
-//                 }
-//             }
-//             Element::Styled(mut element) => {
-//                 if let Some(content) = std::mem::take(&mut element.content) {
-//                     content_strings.extend(get_string_content(content));
-//                 }
-//             }
-//             Element::Unstyled(mut element) => {
-//                 if let Some(content) = std::mem::take(&mut element.content) {
-//                     content_strings.extend(get_string_content(content));
-//                 }
-//             }
-//             Element::Table(mut element) => {
-//                 if let Some(content) = std::mem::take(&mut element.content) {
-//                     content_strings.extend(get_string_content(content));
-//                 }
-//             }
-//             // img elements don't have children
-//             Element::Image(_) => {}
-//             // br elements don't have children
-//             Element::LineBreak(_) => {}
-//             _ => {
-//                 panic!(
-//                     "handle_content_match_type err: matched nothing! | line: {}",
-//                     line!()
-//                 )
-//             }
-//         }
-//     }
-//
-//     content_strings
-// }
-
 /****************** Helper Functions ******************/
 
 fn read_dir_helper<P: AsRef<Path>>(
@@ -684,4 +705,3 @@ fn read_dir_helper<P: AsRef<Path>>(
         Ok(())
     })
 }
-

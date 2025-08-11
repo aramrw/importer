@@ -1,3 +1,5 @@
+//! A simple wrapper for an Arc<parking_lot::RwLock<T>>;
+
 use std::fmt;
 use std::hash::Hash;
 use std::{cmp::Ordering, hash::Hasher, sync::Arc};
@@ -6,14 +8,16 @@ use derive_more::derive::{Deref, DerefMut};
 use parking_lot::{ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock, RwLock};
 use serde::{Deserialize, Serialize};
 
-/// type alias for a [ArcRwLockReadGuard];
+/// A type alias for a read guard of a `Ptr`.
 pub type PtrRGaurd<T> = ArcRwLockReadGuard<RawRwLock, T>;
+/// A type alias for a write guard of a `Ptr`.
 pub type PtrWGaurd<T> = ArcRwLockWriteGuard<RawRwLock, T>;
 /// Simple abstraction over [parking_lot::RwLock]
 #[derive(Deref, DerefMut)]
 pub struct Ptr<T>(Arc<RwLock<T>>);
 
 impl<T> Ptr<T> {
+    /// Creates a new `Ptr`.
     pub fn new(val: T) -> Self {
         Ptr(Arc::new(RwLock::new(val)))
     }

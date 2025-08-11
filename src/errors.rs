@@ -1,3 +1,5 @@
+//! Contains the error types for the library.
+
 use crate::{dictionary_importer::DictionarySummaryError};
 use std::{
     io,
@@ -7,27 +9,35 @@ use thiserror::Error;
 
 /// Abstraction over results for
 pub enum YomichanResult<T> {
+    /// A successful result.
     Result(T),
+    /// An error.
     Err(YomichanError),
 }
 
 /// All possible `yomichan_rs` [Error] paths
 #[derive(Error, Debug)]
 pub enum YomichanError {
+    /// An import error.
     #[error("(-)[yc_error::import] -> \n{0}")]
     Import(#[from] ImportError),
+    /// A database error.
     #[error("(-)[yc_error::db]")]
     Database(#[from] DBError),
     // #[error("(-)[yc_error::profile]")]
     // Profile(#[from] ProfileError),
 }
 
+/// An error that can occur when importing a zip file.
 #[derive(Error, Debug)]
 pub enum ImportZipError {
+    /// The zip path does not exist.
     #[error("the zip path: `{0}` does not exist")]
     DoesNotExist(PathBuf),
+    /// A zip crate error.
     #[error("zip crate error: {0}")]
     ZipCrate(#[from] zip::result::ZipError),
+    /// A filesystem IO error.
     #[error("filesystemIO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -44,66 +54,83 @@ impl ImportZipError {
     }
 }
 
+/// An error that can occur when reading a dictionary file.
 #[derive(Error, Debug)]
 pub enum DictionaryFileError {
+    /// Failed to deserialize a file.
     #[error("failed to deserialize file: `{outpath}`\nreason: {reason}")]
     File { outpath: PathBuf, reason: String },
-    #[error(
-        "no data in term_bank stream, is the file empty?
-         file: {0}"
-    )]
+    /// The file is empty.
+    #[error("no data in term_bank stream, is the file empty? file: {0}")]
     Empty(PathBuf),
+    /// Failed to open a file.
     #[error("failed to open file: {outpath}\nreason: {reason}")]
     FailedOpen { outpath: PathBuf, reason: String },
 }
 
+/// An error that can occur when reading a tag bank file.
 #[derive(Error, Debug)]
 pub enum TagBankFileError {
+    /// An IO error.
     #[error("{0}")]
     Io(#[from] io::Error),
+    /// A JSON error.
     #[error("{0}")]
     Json(#[from] serde_json::Error),
 }
 
+/// An error that can occur when importing a dictionary.
 #[derive(Error, Debug)]
 pub enum ImportError {
+    /// The dictionary already exists.
     #[error(
         "cannot import {0} as it is already installed\n[help]: if you are attempting to update it, first call `Yomichan::delete_dictionaries(&self, names: &[&{0}])`, and try importing again"
     )]
     DictionaryAlreadyExists(String),
+    /// A dictionary file error.
     #[error("dictionary file error: {0}")]
     DictionaryFile(#[from] DictionaryFileError),
+    /// A zip error.
     #[error("{0}")]
     Zip(#[from] ImportZipError),
+    /// An IO error.
     #[error("db err: {0}")]
     IO(#[from] std::io::Error),
+    /// A JSON error.
     #[error("json err: {0}")]
     Json(#[from] serde_json::error::Error),
+    /// A thread error.
     #[error("thread err: {0}")]
     ThreadErr(#[from] std::thread::AccessError),
+    /// An error with a line number.
     #[error("error at line {0}: {1}")]
     LineErr(u32, Box<ImportError>),
+    /// A custom error.
     #[error("json err: {0}")]
     Custom(String),
-    #[error(
-        "failed to deserialize file: {file}
-         reason: {e:#?}"
-    )]
+    /// Invalid JSON.
+    #[error("failed to deserialize file: {file}, reason: {e:#?}")]
     InvalidJson { file: PathBuf, e: Option<String> },
+    /// Failed to create a summary.
     #[error("failed to create summary: {0}")]
     Summary(#[from] DictionarySummaryError),
     // #[error("profile error: {0}")]
     // Profile(#[from] ProfileError),
+    /// A tag bank file error.
     #[error("[tag-bank-file error]: {0}")]
     TagBankFile(#[from] TagBankFileError),
 }
 
+/// A database error.
 #[derive(Error, Debug)]
 pub enum DBError {
+    /// A query error.
     #[error("query err: {0}")]
     Query(String),
+    /// No results found.
     #[error("none found err: {0}")]
     NoneFound(String),
+    /// An import error.
     #[error("import err: {0}")]
     Import(#[from] ImportError),
     // #[error("(-)[yc_error::profile]")]

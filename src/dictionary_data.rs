@@ -1,3 +1,5 @@
+//! Contains the data structures for the Yomichan dictionary format.
+
 use indexmap::IndexMap;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -65,20 +67,26 @@ macro_rules! str {
 //     pub sequence: Option<String>,
 // }
 
+/// The type of glossary entry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TermGlossaryType {
+    /// The glossary entry is text.
     Text,
+    /// The glossary entry is an image.
     Image,
 }
 
+/// An image in a glossary entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermGlossaryImage {
+    /// The type of the glossary entry.
     pub term_glossary_type: TermGlossaryType,
+    /// The image element.
     pub term_image: Option<ImageElement>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// Represents the metadata of a dictionary.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct YomichanIndexFile {
     /// Title of the dictionary.
     pub title: String,
@@ -93,9 +101,13 @@ pub struct YomichanIndexFile {
     /// Alias for format.
     /// Versions can include: `1 - 3`.
     pub version: Option<u8>,
+    /// The minimum version of Yomitan required to use this dictionary.
     pub minimum_yomitan_version: Option<String>,
+    /// Whether this dictionary can be updated.
     pub is_updatable: Option<bool>,
+    /// The URL where the index file can be found.
     pub index_url: Option<String>,
+    /// The URL where the dictionary can be downloaded.
     pub download_url: Option<String>,
     /// Creator of the dictionary.
     pub author: Option<String>,
@@ -113,10 +125,13 @@ pub struct YomichanIndexFile {
     ///
     /// See: [iso639 code list](https://www.loc.gov/standards/iso639-2/php/code_list.php).
     pub target_language: Option<String>,
+    /// The frequency mode of the dictionary.
     pub frequency_mode: Option<FrequencyMode>,
+    /// The tag metadata of the dictionary.
     pub tag_meta: Option<IndexMap<String, IndexTag>>,
 }
 impl YomichanIndexFile {
+    /// Converts an index file to a `YomichanIndexFile` struct.
     pub fn convert_index_file(outpath: std::path::PathBuf) -> Result<YomichanIndexFile, ImportError> {
         let index_str =
             std::fs::read_to_string(&outpath).map_err(|e| DictionaryFileError::File {
@@ -131,6 +146,7 @@ impl YomichanIndexFile {
 /// Tag information for terms and kanji.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IndexTagMeta {
+    /// A map of tags.
     pub tags: IndexMap<String, IndexTag>,
 }
 
@@ -199,10 +215,15 @@ pub struct DictionaryDataTag {
 // }
 
 /************* Term Meta *************/
+
+/// A term metadata entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermMeta {
+    /// The term expression.
     pub expression: String,
+    /// The type of metadata.
     pub mode: TermMetaModeType,
+    /// The metadata content.
     pub data: MetaDataMatchType,
 }
 
@@ -210,8 +231,11 @@ pub struct TermMeta {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum MetaDataMatchType {
+    /// Frequency metadata.
     Frequency(TermMetaFreqDataMatchType),
+    /// Pitch accent metadata.
     Pitch(TermMetaPitchData),
+    /// Phonetic transcription metadata.
     Phonetic(TermMetaPhoneticData),
 }
 
@@ -264,8 +288,11 @@ impl<'de> Deserialize<'de> for MetaDataMatchType {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TermMetaModeType {
+    /// Frequency metadata.
     Freq,
+    /// Pitch accent metadata.
     Pitch,
+    /// IPA transcription metadata.
     Ipa,
 }
 impl From<TermMetaModeType> for u8 {
@@ -279,49 +306,75 @@ impl From<TermMetaModeType> for u8 {
 }
 
 /************* Frequency *************/
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+
 /// The frequency metadata of a term.
 ///
 /// This is currently use to [`Deserialize`] terms from
 /// term_meta_bank_$ files.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermMetaFrequency {
+    /// The term expression.
     pub expression: String,
     /// This will be `"freq"` in the json.
     pub mode: TermMetaModeType,
+    /// The frequency data.
     pub data: TermMetaFreqDataMatchType,
 }
+
+/// Information about the frequency of a term.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FrequencyInfo {
+    /// The frequency of the term.
     pub frequency: i128,
+    /// The display value of the frequency.
     pub display_value: Option<String>,
+    /// Whether the display value is parsed.
     pub display_value_parsed: bool,
 }
+
+/// The frequency data of a term.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 //#[serde(untagged)]
 pub enum TermMetaFreqDataMatchType {
+    /// Frequency data with a reading.
     WithReading(TermMetaFreqDataWithReading),
+    /// Generic frequency data.
     Generic(GenericFreqData),
 }
+
+/// Generic frequency data.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 //#[serde(untagged)]
 pub enum GenericFreqData {
+    /// Frequency data as an object.
     Object(FreqObjectData),
+    /// Frequency data as an integer.
     Integer(i128),
+    /// Frequency data as a string.
     String(String),
 }
+
+/// Frequency data as an object.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FreqObjectData {
+    /// The frequency value.
     pub value: i128,
+    /// The display value of the frequency.
     #[serde(rename = "displayValue")]
     pub display_value: Option<String>,
 }
+
+/// Frequency data with a reading.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermMetaFreqDataWithReading {
+    /// The reading of the term.
     pub reading: String,
+    /// The frequency data.
     pub frequency: GenericFreqData,
 }
 
 impl GenericFreqData {
+    /// Tries to get the reading from the frequency data.
     pub fn try_get_reading(&self) -> Option<&String> {
         match self {
             Self::Integer(_) => None,
@@ -334,8 +387,8 @@ impl GenericFreqData {
 
 /************* Pitch / Speech Data *************/
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// The pitch metadata of a term.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermMetaPitch {
     expression: String,
     /// This will be `"pitch"` in the json.
@@ -346,12 +399,14 @@ pub struct TermMetaPitch {
 /// Helper enum to match [TermMetaPitchAccent] data more accurately.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum VecNumOrNum {
+    /// A vector of numbers.
     Vec(Vec<u8>),
+    /// A single number.
     Num(u8),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// List of different pitch accent information for the term and reading combination.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pitch {
     /// Mora position of the pitch accent downstep.
     /// A value of 0 indicates that the word does not have a downstep (heiban).
@@ -365,10 +420,12 @@ pub struct Pitch {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// The pitch data of a term.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermMetaPitchData {
+    /// The reading of the term.
     pub reading: String,
+    /// The pitch accent information.
     pub pitches: Vec<Pitch>,
 }
 

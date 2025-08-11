@@ -1,3 +1,5 @@
+//! Contains the data structures for the database format.
+
 use crate::dictionary_data::{
     MetaDataMatchType, TermMeta, TermMetaFreqDataMatchType, TermMetaModeType, TermMetaPitchData,
 };
@@ -16,9 +18,12 @@ use std::fs;
 use std::io::BufReader;
 use std::path::PathBuf;
 
+/// Media data with array buffer content.
 pub type MediaDataArrayBufferContent = MediaDataBase<Vec<u8>>;
+/// Media data with string content.
 pub type MediaDataStringContent = MediaDataBase<String>;
 
+/// Base struct for media data.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaDataBase<TContentType: Serialize> {
     dictionary: String,
@@ -29,12 +34,16 @@ pub struct MediaDataBase<TContentType: Serialize> {
     content: TContentType,
 }
 
+/// The type of media.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum MediaType {
+    /// Media as an array buffer.
     ArrayBuffer(Vec<u8>),
+    /// Media as a string.
     String(String),
 }
 
+/// A media entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Media<T = MediaType> {
     index: usize,
@@ -99,27 +108,42 @@ impl From<DatabaseTermEntry> for DatabaseTermEntryTuple {
     }
 }
 
+/// A term entry in the database.
 #[skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(from = "DatabaseTermEntryTuple", into = "DatabaseTermEntryTuple")]
 pub struct DatabaseTermEntry {
+    /// The unique ID of the term.
     pub id: String,
+    /// The term expression.
     pub expression: String,
+    /// The term reading.
     pub reading: String,
+    /// The reverse of the term expression.
     pub expression_reverse: String,
+    /// The reverse of the term reading.
     pub reading_reverse: String,
+    /// The definition tags.
     pub definition_tags: Option<String>,
     /// Legacy alias for the `definitionTags` field.
     pub tags: Option<String>,
+    /// The rules for the term.
     pub rules: String,
+    /// The score of the term.
     pub score: i128,
+    /// The glossary of the term.
     pub glossary: Vec<TermGlossaryGroupType>,
+    /// The sequence number of the term.
     pub sequence: Option<i128>,
+    /// The term tags.
     pub term_tags: Option<String>,
+    /// The dictionary the term belongs to.
     pub dictionary: String,
+    /// The path to the file containing the term.
     pub file_path: String,
 }
 
+/// A tuple representation of a `DatabaseTermEntry`.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DatabaseTermEntryTuple(
     // id
@@ -156,8 +180,11 @@ pub struct DatabaseTermEntryTuple(
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TermSourceMatchSource {
+    /// The term was matched by the term field.
     Term,
+    /// The term was matched by the reading field.
     Reading,
+    /// The term was matched by the sequence field.
     Sequence,
 }
 
@@ -165,25 +192,42 @@ pub enum TermSourceMatchSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TermSourceMatchType {
+    /// The search term is an exact match.
     Exact,
+    /// The search term is a prefix of the final term.
     Prefix,
+    /// The search term is a suffix of the final term.
     Suffix,
 }
 
+/// A term entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermEntry {
+    /// The unique ID of the term.
     pub id: String,
+    /// The index of the term.
     pub index: usize,
+    /// The match type.
     pub match_type: TermSourceMatchType,
+    /// The match source.
     pub match_source: TermSourceMatchSource,
+    /// The term expression.
     pub term: String,
+    /// The term reading.
     pub reading: String,
+    /// The definition tags.
     pub definition_tags: Vec<String>,
+    /// The term tags.
     pub term_tags: Vec<String>,
+    /// The rules for the term.
     pub rules: Vec<String>,
+    /// The definitions of the term.
     pub definitions: Vec<TermGlossaryGroupType>,
+    /// The score of the term.
     pub score: i128,
+    /// The dictionary the term belongs to.
     pub dictionary: String,
+    /// The sequence number of the term.
     pub sequence: i128,
 }
 
@@ -228,20 +272,22 @@ impl DatabaseTermEntry {
     }
 }
 
+/// A tag in the database.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DatabaseTag {
-    /// id field doesn't exist in JS
-    /// need it because primary keys must be unique
-    //#[serde(skip_deserializing, default)]
+    /// The unique ID of the tag.
     pub id: String,
+    /// The name of the tag.
     pub name: String,
+    /// The category of the tag.
     pub category: String,
+    /// The order of the tag.
     pub order: u64,
+    /// The notes of the tag.
     pub notes: String,
+    /// The score of the tag.
     pub score: i128,
-    /// dictionary gets added afterwards
-    /// it doesn't exist in any yomitan dictionary
-    //#[serde(skip_deserializing, default)]
+    /// The dictionary the tag belongs to.
     pub dictionary: String,
 }
 
@@ -255,10 +301,14 @@ pub trait DBMetaType {
 // /// A custom `Yomichan_rs`-unique, generic Database Meta model.
 // ///
 // /// May contain `any` or `all` of the values.
+/// The type of metadata for a term.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DatabaseMetaMatchType {
+    /// Frequency metadata.
     Frequency(DatabaseMetaFrequency),
+    /// Pitch accent metadata.
     Pitch(DatabaseMetaPitch),
+    /// Phonetic transcription metadata.
     Phonetic(DatabaseMetaPhonetic),
 }
 
@@ -365,11 +415,15 @@ impl DatabaseMetaMatchType {
 /// Used to store the frequency metadata of a term in the db.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseMetaFrequency {
+    /// The unique ID of the metadata.
     pub id: String,
+    /// The expression of the term.
     pub freq_expression: String,
     /// Is of type [`TermMetaModeType::Freq`]
     pub mode: TermMetaModeType,
+    /// The frequency data.
     pub data: TermMetaFreqDataMatchType,
+    /// The dictionary the metadata belongs to.
     pub dictionary: String,
 }
 impl DBMetaType for DatabaseMetaFrequency {
@@ -384,16 +438,20 @@ impl DBMetaType for DatabaseMetaFrequency {
 /// Used to store the pitch metadata of a term in the db.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseMetaPitch {
+    /// The unique ID of the metadata.
     pub id: String,
+    /// The expression of the term.
     pub pitch_expression: String,
     /// Is of type [`TermMetaModeType::Pitch`]
     pub mode: TermMetaModeType,
+    /// The pitch data.
     pub data: TermMetaPitchData,
+    /// The dictionary the metadata belongs to.
     pub dictionary: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 /// A tag represents some brief information about part of a dictionary entry.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct DictionaryTag {
     /// The name of the tag.
     pub name: String,
@@ -455,19 +513,28 @@ impl DBMetaType for DatabaseMetaPitch {
 /// Used to store the phonetic metadata of a term in the db.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseMetaPhonetic {
+    /// The unique ID of the metadata.
     pub id: String,
+    /// The expression of the term.
     pub phonetic_expression: String,
     /// Is of type [`TermMetaModeType::Ipa`]
     pub mode: TermMetaModeType,
+    /// The phonetic data.
     pub data: TermMetaPhoneticData,
+    /// The dictionary the metadata belongs to.
     pub dictionary: String,
 }
+
+/// The phonetic data of a term.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermMetaPhoneticData {
+    /// The reading of the term.
     pub reading: String,
     /// List of different IPA transcription information for the term and reading combination.
     pub transcriptions: Vec<PhoneticTranscription>,
 }
+
+/// A phonetic transcription of a term.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PhoneticTranscription {
     /// Type of the pronunciation, for disambiguation between union type members.
@@ -478,16 +545,24 @@ pub struct PhoneticTranscription {
     /// List of tags for this IPA transcription.
     pub tags: Vec<DictionaryTag>,
 }
+
+/// The type of pronunciation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TermPronunciationMatchType {
+    /// Pitch accent.
     #[serde(rename = "lowercase")]
     PitchAccent,
+    /// Phonetic transcription.
     #[serde(rename = "phonetic-transcription")]
     PhoneticTranscription,
 }
+
+/// The pronunciation of a term.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Pronunciation {
+    /// Pitch accent.
     PitchAccent(PitchAccent),
+    /// Phonetic transcription.
     PhoneticTranscription(PhoneticTranscription),
 }
 impl DBMetaType for DatabaseMetaPhonetic {
@@ -504,24 +579,34 @@ impl DBMetaType for DatabaseMetaPhonetic {
 /// Kanji Meta's only have frequency data
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DatabaseKanjiMeta {
+    /// The kanji character.
     pub character: String,
     /// Is of type [TermMetaModeType::Freq]
     pub mode: TermMetaModeType,
+    /// The frequency data.
     pub data: TermMetaFreqDataMatchType,
+    /// The dictionary the kanji belongs to.
     pub dictionary: String,
 }
 
+/// A kanji entry in the database.
 #[serde_as]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatabaseKanjiEntry {
+    /// The kanji character.
     pub character: String,
+    /// The on'yomi reading of the kanji.
     #[serde_as(as = "NoneAsEmptyString")]
     pub onyomi: Option<String>,
+    /// The kun'yomi reading of the kanji.
     #[serde_as(as = "NoneAsEmptyString")]
     pub kunyomi: Option<String>,
+    /// The tags of the kanji.
     #[serde_as(as = "NoneAsEmptyString")]
     pub tags: Option<String>,
+    /// The meanings of the kanji.
     pub meanings: Vec<String>,
+    /// The stats of the kanji.
     pub stats: Option<IndexMap<String, String>>,
     /// The kanji dictionary name.
     /// Does not exist within the JSON, gets added _after_ deserialization.
@@ -529,28 +614,40 @@ pub struct DatabaseKanjiEntry {
     pub dictionary: Option<String>,
 }
 
+/// A kanji entry.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KanjiEntry {
+    /// The index of the kanji.
     pub index: usize,
+    /// The kanji character.
     pub character: String,
+    /// The on'yomi readings of the kanji.
     pub onyomi: Vec<String>,
+    /// The kun'yomi readings of the kanji.
     pub kunyomi: Vec<String>,
+    /// The tags of the kanji.
     pub tags: Vec<String>,
+    /// The definitions of the kanji.
     pub definitions: Vec<String>,
+    /// The stats of the kanji.
     pub stats: IndexMap<String, String>,
+    /// The dictionary the kanji belongs to.
     pub dictionary: String,
 }
 
 /*************** Database Dictionary ***************/
 
+/// A group of dictionary counts.
 pub type DictionaryCountGroup = IndexMap<String, u16>;
 
+/// The counts of a dictionary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DictionaryCounts {
     total: Option<DictionaryCountGroup>,
     counts: Vec<DictionaryCountGroup>,
 }
 
+/// The progress data for deleting a dictionary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeleteDictionaryProgressData {
     count: u64,
@@ -566,9 +663,12 @@ pub struct DeleteDictionaryProgressData {
 //     reason: Box<native_db::db_type::Error>,
 // }
 
+/// The type of query request.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum QueryRequestMatchType {
+    /// An exact term query request.
     TermExactQueryRequest(TermExactQueryRequest),
+    /// A generic query request.
     GenericQueryRequest(GenericQueryRequest),
 }
 /// converts any `IntoIter<Enum::Variant(T)>` to a `IntoIter<Item = T>`
@@ -647,15 +747,21 @@ macro_rules! variant_to_generic_vec_mut {
 //     },
 // }
 
+/// An exact term query request.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TermExactQueryRequest {
+    /// The term to query.
     pub term: String,
+    /// The reading of the term.
     pub reading: String,
 }
 
+/// The type of query.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Eq, PartialOrd, Ord, Hash)]
 pub enum QueryType {
+    /// A string query.
     String(String),
+    /// A sequence query.
     Sequence(i128),
 }
 /// so far it seems this can be refactored to use references
@@ -681,14 +787,17 @@ impl GenericQueryRequest {
     }
 }
 
+/// A media request.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MediaRequest {
     path: String,
     dictionary: String,
 }
 
+/// The type of item in a multi-bulk find data.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum FindMultiBulkDataItemType {
+    /// A string item.
     String(String),
     // Consider adding other types if `item` in JS can be non-string for into_term_generic
 }
@@ -704,11 +813,17 @@ impl PartialEq<FindMultiBulkDataItemType> for String {
 /// A single yomichan/yomitan dictionary's file data all parsed into rust types.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DatabaseDictionaryData {
+    /// The list of tags.
     pub tag_list: Vec<DatabaseTag>,
+    /// The list of kanji metadata.
     pub kanji_meta_list: Vec<DatabaseMetaFrequency>,
+    /// The list of kanji.
     pub kanji_list: Vec<DatabaseKanjiEntry>,
+    /// The list of term metadata.
     pub term_meta_list: Vec<DatabaseMetaMatchType>,
+    /// The list of terms.
     pub term_list: Vec<DatabaseTermEntryTuple>,
+    /// The summary of the dictionary.
     pub summary: DictionarySummary,
 }
 

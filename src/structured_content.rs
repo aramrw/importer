@@ -1,9 +1,13 @@
+//! Contains the data structures for the structured content of the dictionary entries.
+
 use std::{fmt, hash::Hash, marker::PhantomData};
 use compact_str::{CompactString, ToCompactString};
 
 use indexmap::IndexMap;
 use serde::{
-    Deserialize, Deserializer, Serialize,
+    Deserialize,
+    Deserializer,
+    Serialize,
     de::{self, MapAccess, SeqAccess, Visitor},
 };
 use serde_json::Value;
@@ -22,7 +26,7 @@ pub struct StructuredContent {
     /// Contains the main content of the entry.
     /// _(see: [`ContentMatchType`] )_.
     ///
-    /// Will _always_ be either an `Element (obj)` or a `Content (array)` _(ie: Never a String)_.
+    /// Will _always_ be either an `Element (obj)` or a `Content (array)` _(ie: Never a String)`.
     pub content: ContentMatchType,
 }
 
@@ -40,6 +44,7 @@ pub enum ContentMatchType {
     /// See: [`HtmlTag`].
     ///
     Content(Vec<ContentMatchType>),
+    /// A string.
     String(CompactString),
 }
 
@@ -84,11 +89,9 @@ impl<'de> Deserialize<'de> for ContentMatchType {
 
         // Step 5: If all attempts failed, report everything.
         Err(de::Error::custom(format!(
-            "Data did not match any variant of ContentMatchType (Element, Vec, or String).\n\
-            Problematic value: {}\n\n\
-            Errors:\n- {}",
+            "Data did not match any variant of ContentMatchType (Element, Vec, or String).\n\nProblematic value: {}\n\nErrors:\n-{}",
             value,
-            errors.join("\n- ")
+            errors.join("\n-")
         )))
     }
 }
@@ -108,15 +111,20 @@ pub struct TermGlossaryContentGroup {
     pub html: Option<CompactString>,
 }
 
+/// The type of a term glossary group.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
 pub enum TermGlossaryGroupType {
+    /// A content group.
     Content(TermGlossaryContentGroup),
+    /// A deinflection group.
     Deinflection(TermGlossaryDeinflection),
 }
 
+/// A term glossary entry.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum TermGlossary {
+    /// A content entry.
     Content(TermGlossaryContent),
     /// This is a tuple struct in js.
     /// If you see an `Array.isArray()` check on a [TermGlossary], its looking for this.
@@ -284,9 +292,12 @@ impl TermGlossaryContent {
     }
 }
 
+/// A deinflection entry in a term glossary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermGlossaryDeinflection {
+    /// The form of the deinflection.
     pub form_of: CompactString,
+    /// The rules of the deinflection.
     pub rules: Vec<CompactString>,
 }
 
@@ -331,19 +342,19 @@ impl<'de> Deserialize<'de> for TermGlossary {
 
             // Case 4: Failed to parse as either.
             (Err(de), Err(co)) => Err(de::Error::custom(format!(
-                "Data did not match any variant of TermGlossary.\n\
-                    Deinflection Error: {de}\n\
-                    Content Error: {co}\n\
-                    Value: {value:#?}"
+                "Data did not match any variant of TermGlossary.\n    Deinflection Error: {de}\n    Content Error: {co}\n    Value: {value:#?}"
             ))),
         }
     }
 }
 
+/// The content of a term glossary.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum TermGlossaryContent {
+    /// Tagged content.
     Tagged(TaggedContent),
+    /// A string.
     String(CompactString),
 }
 
@@ -375,23 +386,25 @@ impl<'de> Deserialize<'de> for TermGlossaryContent {
 
         // Step 4: If both attempts failed, report everything.
         Err(de::Error::custom(format!(
-            "Data did not match any variant of TermGlossaryContent (Tagged or String).\n\
-            Problematic value: {}\n\n\
-            Attempt 1 (as TaggedContent) failed with: {}\n\
-            Attempt 2 (as String) failed with: {}",
+            "Data did not match any variant of TermGlossaryContent (Tagged or String).\n\nProblematic value: {}\n\nAttempt 1 (as TaggedContent) failed with: {}\nAttempt 2 (as String) failed with: {}",
             serde_json::to_string_pretty(&value).unwrap_or_else(|_| format!("{value:?}")),
             tagged_error,
             string_error
         )))
     }
 }
+
+/// Tagged content.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type")]
 pub enum TaggedContent {
+    /// Text content.
     #[serde(rename = "text")]
     Text { text: CompactString },
+    /// Image content.
     #[serde(rename = "img")]
     Image(Box<ImageElement>),
+    /// Structured content.
     #[serde(rename = "structured-content")]
     StructuredContent {
         // The payload is the value of the "content" field.
@@ -423,20 +436,20 @@ impl<'de> Deserialize<'de> for TaggedContent {
             {
                 // The first element is the tag string.
                 let tag: String = seq
-                    .next_element()?
+                    .next_element()? 
                     .ok_or_else(|| de::Error::invalid_length(0, &"a [tag, payload] sequence"))?;
 
                 // The second element is the payload, which depends on the tag.
                 let content = match tag.as_str() {
                     "text" => {
                         let text: String = seq
-                            .next_element()?
+                            .next_element()? 
                             .ok_or_else(|| de::Error::invalid_length(1, &"a text payload"))?;
                         TaggedContent::Text { text: text.into() }
                     }
                     "img" => {
                         let image_payload: Box<ImageElement> = seq
-                            .next_element()?
+                            .next_element()? 
                             .ok_or_else(|| de::Error::invalid_length(1, &"an image payload"))?;
                         TaggedContent::Image(image_payload)
                     }
@@ -470,7 +483,7 @@ impl<'de> Deserialize<'de> for TaggedContent {
                 // To handle an internally tagged enum from a map, the easiest
                 // way is to deserialize into a generic value and then use
                 // from_value, which re-applies Serde's `#[serde(tag = "...")]` logic.
-                let value =
+                let value = 
                     serde_json::Value::deserialize(de::value::MapAccessDeserializer::new(map))?;
 
                 // This helper struct allows us to leverage Serde's derived logic for internally tagged enums.
@@ -506,8 +519,10 @@ impl<'de> Deserialize<'de> for TaggedContent {
     }
 }
 
+/// A text entry in a term glossary.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct TermGlossaryText {
+    /// The text of the glossary entry.
     pub text: CompactString,
 }
 
@@ -515,149 +530,229 @@ pub struct TermGlossaryText {
 /// of a `term_bank_${i}.json` entry item.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TermEntryItem {
+    /// The expression of the term.
     pub expression: CompactString,
+    /// The reading of the term.
     pub reading: CompactString,
+    /// The definition tags.
     pub def_tags: Option<CompactString>,
+    /// The rules for the term.
     pub rules: CompactString,
+    /// The score of the term.
     pub score: i128,
+    /// The structured content of the term.
     pub structured_content: Vec<TermGlossary>,
+    /// The sequence number of the term.
     pub sequence: i128,
+    /// The term tags.
     pub term_tags: CompactString,
 }
 
+/// The rendering of an image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageRendering {
+    /// Automatic rendering.
     Auto,
+    /// Pixelated rendering.
     Pixelated,
+    /// Crisp edges rendering.
     CrispEdges,
 }
 
+/// The appearance of an image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageAppearance {
+    /// Automatic appearance.
     Auto,
+    /// Monochrome appearance.
     Monochrome,
 }
 
+/// An HTML tag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HtmlTag {
+    /// A ruby tag.
     #[serde(rename = "ruby")]
     Ruby,
+    /// A ruby text tag.
     #[serde(rename = "rt")]
     RubyText,
+    /// A ruby parenthesis tag.
     #[serde(rename = "rp")]
     RubyParenthesis,
+    /// A table tag.
     Table,
+    /// A table data tag.
     #[serde(rename = "td")]
     TableData,
+    /// A table header tag.
     #[serde(rename = "th")]
     TableHeader,
+    /// A table body tag.
     #[serde(rename = "tb")]
     TableBody,
+    /// A table footer tag.
     #[serde(rename = "tf")]
     TableFooter,
+    /// A table row tag.
     #[serde(rename = "tr")]
     TableRow,
+    /// An anchor tag.
     #[serde(rename = "a")]
     Anchor,
+    /// A span tag.
     Span,
+    /// A div tag.
     Div,
+    /// An ordered list tag.
     #[serde(rename = "ol")]
     OrderedList,
+    /// An unordered list tag.
     #[serde(rename = "ul")]
     UnorderedList,
+    /// A list item tag.
     #[serde(rename = "li")]
     ListItem,
+    /// A details tag.
     Details,
+    /// A summary tag.
     Summary,
+    /// A break tag.
     #[serde(rename = "br")]
     Break,
+    /// An image tag.
     Img,
 }
 
+/// The vertical alignment of an element.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VerticalAlign {
+    /// Baseline alignment.
     Baseline,
+    /// Subscript alignment.
     Sub,
+    /// Superscript alignment.
     Super,
+    /// Text top alignment.
     #[serde(rename = "text-bottom")]
     TextTop,
+    /// Text bottom alignment.
     #[serde(rename = "text-bottom")]
     TextBottom,
+    /// Middle alignment.
     Middle,
+    /// Top alignment.
     Top,
+    /// Bottom alignment.
     Bottom,
 }
 
+/// The text decoration line of an element.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TextDecorationLine {
+    /// Underline.
     Underline,
+    /// Overline.
     Overline,
+    /// Line through.
     LineThrough,
 }
 
+/// The text decoration line of an element, or none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TextDecorationLineOrNone {
+    /// No text decoration.
     None,
+    /// A text decoration line.
     TextDecorationLine(TextDecorationLine),
 }
 
+/// The text decoration style of an element.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TextDecorationStyle {
+    /// Solid.
     Solid,
+    /// Double.
     Double,
+    /// Dotted.
     Dotted,
+    /// Dashed.
     Dashed,
+    /// Wavy.
     Wavy,
 }
 
+/// The font style of an element.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FontStyle {
+    /// Normal.
     Normal,
+    /// Italic.
     Italic,
 }
 
+/// The font weight of an element.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FontWeight {
+    /// Normal.
     Normal,
+    /// Bold.
     Bold,
 }
 
+/// The word break of an element.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WordBreak {
+    /// Normal.
     Normal,
+    /// Break all.
     BreakAll,
+    /// Keep all.
     KeepAll,
 }
 
+/// The text alignment of an element.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TextAlign {
+    /// Start.
     Start,
+    /// End.
     End,
+    /// Left.
     Left,
+    /// Right.
     Right,
+    /// Center.
     Center,
+    /// Justify.
     Justify,
+    /// Justify all.
     JustifyAll,
+    /// Match parent.
     MatchParent,
 }
 
+/// The size units of an element.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SizeUnits {
+    /// Pixels.
     Px,
+    /// Ems.
     Em,
 }
 
+/// The style of a structured content element.
 #[skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -718,7 +813,7 @@ impl<'de> Visitor<'de> for ElementVisitor {
         // The idea is to deserialize the entire sequence into a serde_json::Value
         // ONLY because the rest of your logic depends on it. A more performant
         // solution would deserialize field-by-field.
-        let value_seq: Vec<Value> =
+        let value_seq: Vec<Value> = 
             de::Deserialize::deserialize(de::value::SeqAccessDeserializer::new(&mut seq))?;
         let value = Value::Array(value_seq);
 
@@ -732,7 +827,7 @@ impl<'de> Visitor<'de> for ElementVisitor {
         A: MapAccess<'de>,
     {
         // Same principle: reconstruct a `serde_json::Value` and use your existing logic.
-        let value_map: serde_json::Map<String, Value> =
+        let value_map: serde_json::Map<String, Value> = 
             de::Deserialize::deserialize(de::value::MapAccessDeserializer::new(&mut map))?;
         let value = Value::Object(value_map);
 
@@ -812,34 +907,19 @@ impl<'de> Deserialize<'de> for Element {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum Element {
+    /// An unknown string.
     UnknownString(String),
-    //#[serde(rename = "a")]
+    /// A link element.
     Link(LinkElement),
-    // #[serde(
-    //     alias = "div",
-    //     alias = "span",
-    //     alias = "ol",
-    //     alias = "ul",
-    //     alias = "li",
-    //     alias = "details",
-    //     alias = "summary",
-    //     alias = "th",
-    //     alias = "td"
-    // )]
+    /// A styled element.
     Styled(StyledElement),
-    //     alias = "rt",
-    //     alias = "rp",
-    //     alias = "t",
-    //     alias = "tb",
-    //     alias = "tf",
-    //     alias = "tr"
-    // )]
+    /// An unstyled element.
     Unstyled(UnstyledElement),
-    //#[serde(alias = "td", alias = "th")]
+    /// A table element.
     Table(TableElement),
-    //#[serde(rename = "br")]
+    /// A line break element.
     LineBreak(LineBreak),
-    //#[serde(rename = "img")]
+    /// An image element.
     Image(ImageElement),
 }
 
@@ -854,6 +934,7 @@ pub struct LineBreak {
     data: Option<IndexMap<CompactString, CompactString>>,
 }
 
+/// An unstyled element.
 #[skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -869,12 +950,15 @@ pub struct UnstyledElement {
     /// [`HtmlTag::TableFooter`],
     /// [`HtmlTag::TableRow`].
     pub tag: HtmlTag,
+    /// The content of the element.
     pub content: Option<ContentMatchType>,
+    /// The data of the element.
     pub data: Option<IndexMap<String, String>>,
     /// Defines the language of an element in the format defined by RFC 5646.
     lang: Option<CompactString>,
 }
 
+/// A table element.
 #[skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -884,10 +968,15 @@ pub struct TableElement {
     /// [`HtmlTag::TableData`],
     /// [`HtmlTag::TableHeader`].
     pub tag: HtmlTag,
+    /// The content of the element.
     pub content: Option<ContentMatchType>,
+    /// The data of the element.
     pub data: Option<IndexMap<String, String>>,
+    /// The column span of the element.
     pub col_span: Option<u16>,
+    /// The row span of the element.
     pub row_span: Option<u16>,
+    /// The style of the element.
     pub style: Option<StructuredContentStyle>,
     /// Defines the language of an element in the format defined by RFC 5646.
     lang: Option<CompactString>,
@@ -914,7 +1003,7 @@ impl<'de> Deserialize<'de> for TableElement {
             {
                 // Field 1: Tag (required, always first)
                 let tag: HtmlTag = seq
-                    .next_element()?
+                    .next_element()? 
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 // Now, we handle the rest of the fields which might be optional or in any order.
@@ -945,8 +1034,7 @@ impl<'de> Deserialize<'de> for TableElement {
                     }
 
                     // Try to see if it's a data object
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone())
-                    {
+                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
                         data = Some(d);
                         continue;
                     }
@@ -1005,6 +1093,7 @@ impl<'de> Deserialize<'de> for TableElement {
     }
 }
 
+/// A styled element.
 #[skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1019,11 +1108,15 @@ pub struct StyledElement {
     /// [`HtmlTag::Details`],
     /// [`HtmlTag::Summary`].
     pub tag: HtmlTag,
+    /// The content of the element.
     pub content: Option<ContentMatchType>,
+    /// The data of the element.
     pub data: Option<IndexMap<String, String>>,
+    /// The style of the element.
     pub style: Option<StructuredContentStyle>,
     /// Hover text for the element.
     pub title: Option<CompactString>,
+    /// Whether the element is open.
     pub open: Option<bool>,
     /// Defines the language of an element in the format defined by RFC 5646.
     lang: Option<CompactString>,
@@ -1063,7 +1156,7 @@ where
 
         // Tag is always first and required.
         let tag: String = seq
-            .next_element()?
+            .next_element()? 
             .ok_or_else(|| de::Error::invalid_length(0, &"tag"))?;
         map.insert("tag".to_string(), Value::String(tag));
 
@@ -1118,6 +1211,7 @@ where
     }
 }
 
+/// A link element.
 #[skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1126,6 +1220,7 @@ pub struct LinkElement {
     ///
     /// [`HtmlTag::Anchor`] | `"a"`.
     pub tag: HtmlTag,
+    /// The content of the element.
     pub content: Option<ContentMatchType>,
     /// The URL for the link.
     ///
@@ -1137,17 +1232,22 @@ pub struct LinkElement {
     pub lang: Option<String>,
 }
 
+/// A number or a string.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum NumberOrString {
+    /// A number.
     Number(f64),
+    /// A string.
     String(CompactString),
 }
 
+/// An image element.
 #[skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageElement {
+    /// The tag of the element.
     pub tag: HtmlTag,
     /// This element doesn't support children.
     pub content: Option<()>,
@@ -1159,6 +1259,7 @@ pub struct ImageElement {
     pub border_radius: Option<String>,
     /// The units for the width and height.
     pub size_units: Option<SizeUnits>,
+    /// The data of the element.
     pub data: Option<IndexMap<String, String>>,
     /// Path to the image file in the archive.
     pub path: CompactString,
@@ -1260,7 +1361,7 @@ impl<'de> Deserialize<'de> for StyledElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()?
+                    .next_element()? 
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
@@ -1281,8 +1382,7 @@ impl<'de> Deserialize<'de> for StyledElement {
                     }
 
                     // Is it a map? -> `data`
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone())
-                    {
+                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
                         if data.is_none() {
                             data = Some(d);
                         }
@@ -1401,15 +1501,14 @@ impl<'de> Deserialize<'de> for UnstyledElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()?
+                    .next_element()? 
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
                 let mut data = None;
 
                 while let Some(value) = seq.next_element::<Value>()? {
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone())
-                    {
+                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
                         if data.is_none() {
                             data = Some(d);
                         }
@@ -1475,7 +1574,7 @@ impl<'de> Deserialize<'de> for LinkElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()?
+                    .next_element()? 
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
@@ -1591,13 +1690,13 @@ impl<'de> Deserialize<'de> for ImageElement {
                 // Based on the log, the sequence appears to be:
                 // [tag, size_units, path, width, height, alt, appearance, pixelated, collapsed, collapsible]
                 let tag: HtmlTag = seq
-                    .next_element()?
+                    .next_element()? 
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 // The rest of the fields have a fixed order in this compact format.
                 let size_units: Option<SizeUnits> = seq.next_element()?.unwrap_or(None);
                 let path: CompactString = seq
-                    .next_element()?
+                    .next_element()? 
                     .ok_or_else(|| de::Error::invalid_length(2, &self))?;
                 let width: Option<f32> = seq.next_element()?.unwrap_or(None);
                 let height: Option<f32> = seq.next_element()?.unwrap_or(None);
@@ -1675,7 +1774,7 @@ impl<'de> Deserialize<'de> for LineBreak {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()?
+                    .next_element()? 
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
                 let data: Option<IndexMap<String, String>> = seq.next_element()?.unwrap_or(None);
 

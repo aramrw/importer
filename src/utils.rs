@@ -1,3 +1,5 @@
+//! Contains utility functions and traits.
+
 use indexmap::IndexMap;
 
 /// A trait for types/collections that can be empty.
