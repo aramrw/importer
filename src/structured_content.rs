@@ -10,13 +10,13 @@ use serde_json::Value;
 use serde_with::skip_serializing_none;
 
 /// The object holding all html & information about an entry.
-/// _There is only 1 per entry_.
+/// There is only one per term entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StructuredContent {
     /// Identifier to mark the start of each entry's content.
     ///
     /// This should _always_ be `"type": "structured-content"` in the file.
-    /// If not, the dictionary is not valid.
+    /// If not, the entry is not valid.
     #[serde(rename = "type")]
     pub content_type: CompactString,
     /// Contains the main content of the entry.
@@ -56,7 +56,7 @@ impl<'de> Deserialize<'de> for ContentMatchType {
         })?;
 
         // errors from each attempt
-        let mut errors = Vec::new();
+        let mut errors = Vec::with_capacity(3);
 
         // Try as Element (expects an object or array representing a tag).
         if value.is_object() || value.is_array() {
@@ -118,7 +118,6 @@ pub enum TermGlossaryGroupType {
 #[serde(untagged)]
 pub enum TermGlossary {
     Content(TermGlossaryContent),
-    //Content(TermGlossaryContent),
     /// This is a tuple struct in js.
     /// If you see an `Array.isArray()` check on a [TermGlossary], its looking for this.
     Deinflection(TermGlossaryDeinflection),

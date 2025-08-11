@@ -3,7 +3,6 @@ use std::hash::Hash;
 use std::{cmp::Ordering, hash::Hasher, sync::Arc};
 
 use derive_more::derive::{Deref, DerefMut};
-use native_db::{Key, ToKey};
 use parking_lot::{ArcRwLockReadGuard, ArcRwLockWriteGuard, RawRwLock, RwLock};
 use serde::{Deserialize, Serialize};
 
@@ -13,20 +12,6 @@ pub type PtrWGaurd<T> = ArcRwLockWriteGuard<RawRwLock, T>;
 /// Simple abstraction over [parking_lot::RwLock]
 #[derive(Deref, DerefMut)]
 pub struct Ptr<T>(Arc<RwLock<T>>);
-
-impl<T> ToKey for Ptr<T>
-where
-    T: ToKey,
-{
-    fn to_key(&self) -> Key {
-        // get exclusive read & write access before writing to the database
-        let ptr = &*self.clone().write_arc();
-        ptr.to_key()
-    }
-    fn key_names() -> Vec<String> {
-        vec!["Ptr".into(), "YomichanPtr".into()]
-    }
-}
 
 impl<T> Ptr<T> {
     pub fn new(val: T) -> Self {

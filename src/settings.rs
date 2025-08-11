@@ -15,10 +15,6 @@ use getset::Getters;
 use getset::MutGetters;
 use getset::Setters;
 use indexmap::IndexMap;
-use native_db::ToKey;
-use native_db::native_db;
-use native_model::Model;
-use native_model::native_model;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use url::form_urlencoded::Target;
@@ -53,14 +49,11 @@ pub struct GlobalDatabaseOptions {
 }
 
 /// Global Yomichan Settings.
-#[native_model(id = 20, version = 1)]
-#[native_db]
 #[derive(
     Clone, Debug, PartialEq, Serialize, Deserialize, Default, Getters, MutGetters, Setters,
 )]
 #[getset(get = "pub", get_mut = "pub", set = "pub")]
 pub struct YomichanOptions {
-    #[primary_key]
     id: String,
     pub version: String,
     pub profiles: Vec<Ptr<YomichanProfile>>,

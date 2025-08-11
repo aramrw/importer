@@ -37,7 +37,6 @@ impl std::fmt::Display for BacktraceKind {
 // }
 
 /// Copies the test database to a temporary directory.
-/// Necessary because native_db cannot have two test threads
 /// with different Database connections open the same file at the same time.
 pub(crate) fn copy_test_db() -> (PathBuf, TempDir) {
     let dir = tempdir_in(&*TEST_PATHS.tests_dir).unwrap();

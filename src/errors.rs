@@ -1,6 +1,6 @@
-use crate::{dictionary_importer::DictionarySummaryError, settings::ProfileError};
-use native_db::db_type;
+use crate::{dictionary_importer::DictionarySummaryError};
 use std::{
+    io,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
@@ -18,8 +18,8 @@ pub enum YomichanError {
     Import(#[from] ImportError),
     #[error("(-)[yc_error::db]")]
     Database(#[from] DBError),
-    #[error("(-)[yc_error::profile]")]
-    Profile(#[from] ProfileError),
+    // #[error("(-)[yc_error::profile]")]
+    // Profile(#[from] ProfileError),
 }
 
 #[derive(Error, Debug)]
@@ -58,6 +58,14 @@ pub enum DictionaryFileError {
 }
 
 #[derive(Error, Debug)]
+pub enum TagBankFileError {
+    #[error("{0}")]
+    Io(#[from] io::Error),
+    #[error("{0}")]
+    Json(#[from] serde_json::Error),
+}
+
+#[derive(Error, Debug)]
 pub enum ImportError {
     #[error(
         "cannot import {0} as it is already installed\n[help]: if you are attempting to update it, first call `Yomichan::delete_dictionaries(&self, names: &[&{0}])`, and try importing again"
@@ -68,8 +76,6 @@ pub enum ImportError {
     #[error("{0}")]
     Zip(#[from] ImportZipError),
     #[error("db err: {0}")]
-    Database(#[from] Box<db_type::Error>),
-    #[error("io err: {0}")]
     IO(#[from] std::io::Error),
     #[error("json err: {0}")]
     Json(#[from] serde_json::error::Error),
@@ -86,34 +92,22 @@ pub enum ImportError {
     InvalidJson { file: PathBuf, e: Option<String> },
     #[error("failed to create summary: {0}")]
     Summary(#[from] DictionarySummaryError),
-    #[error("profile error: {0}")]
-    Profile(#[from] ProfileError),
-}
-
-impl From<native_db::db_type::Error> for ImportError {
-    fn from(err: native_db::db_type::Error) -> Self {
-        ImportError::Database(Box::new(err))
-    }
+    // #[error("profile error: {0}")]
+    // Profile(#[from] ProfileError),
+    #[error("[tag-bank-file error]: {0}")]
+    TagBankFile(#[from] TagBankFileError),
 }
 
 #[derive(Error, Debug)]
 pub enum DBError {
-    #[error("db err: {0}")]
-    Database(#[from] Box<db_type::Error>),
     #[error("query err: {0}")]
     Query(String),
     #[error("none found err: {0}")]
     NoneFound(String),
     #[error("import err: {0}")]
     Import(#[from] ImportError),
-    #[error("(-)[yc_error::profile]")]
-    Profile(#[from] ProfileError),
-}
-
-impl From<native_db::db_type::Error> for DBError {
-    fn from(err: native_db::db_type::Error) -> Self {
-        DBError::Database(Box::new(err))
-    }
+    // #[error("(-)[yc_error::profile]")]
+    // Profile(#[from] ProfileError),
 }
 
 #[macro_export]

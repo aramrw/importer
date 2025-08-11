@@ -1,14 +1,13 @@
-use bimap::BiHashMap;
 use indexmap::IndexMap;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use std::string::String;
 
-use std::sync::LazyLock;
 
 use crate::dictionary_database::TermMetaPhoneticData;
 use crate::dictionary_importer::FrequencyMode;
-use crate::structured_content::{ImageElement, TermGlossary};
+use crate::errors::{DictionaryFileError, ImportError};
+use crate::structured_content::ImageElement;
 
 trait StrMacro {
     fn from_static_str(s: &'static ::core::primitive::str) -> Self;
@@ -117,17 +116,25 @@ pub struct YomichanIndexFile {
     pub frequency_mode: Option<FrequencyMode>,
     pub tag_meta: Option<IndexMap<String, IndexTag>>,
 }
+impl YomichanIndexFile {
+    pub fn convert_index_file(outpath: std::path::PathBuf) -> Result<YomichanIndexFile, ImportError> {
+        let index_str =
+            std::fs::read_to_string(&outpath).map_err(|e| DictionaryFileError::File {
+                outpath,
+                reason: e.to_string(),
+            })?;
+        let index: YomichanIndexFile = serde_json::from_str(&index_str)?;
+        Ok(index)
+    }
+}
 
-// #[deprecated(since = "0.0.1", note = "individual tag files should be used instead")]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// Tag information for terms and kanji.
-///
-/// This object is deprecated, and individual tag files should be used instead.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IndexTagMeta {
     pub tags: IndexMap<String, IndexTag>,
 }
 
-#[deprecated(since = "0.0.1", note = "individual tag files should be used instead")]
+// #[deprecated(since = "0.0.1", note = "individual tag files should be used instead")]
 /// Tag information for terms and kanji.
 ///
 /// This object is deprecated, and individual tag files should be used instead.
@@ -139,8 +146,8 @@ pub struct IndexTag {
     score: u16,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// Information about a single tag.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DictionaryDataTag {
     /// Tag name.
     pub name: String,
@@ -165,47 +172,33 @@ pub struct DictionaryDataTag {
 
 /// Yomichan-like term model.
 ///
-/// Because of how Yomichan is designed, the definition's raw HTML is contained in
-/// [`TermGlossaryContent::term_glossary_structured_content`]/`content` as a String.
-///
-/// If the program is unable/unwilling to render HTML:
-/// See: [`TermV4`]
-///
 /// Related: [`TermGlossaryContent`]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
-pub struct TermV3 {
-    pub expression: String,
-    pub reading: String,
-    pub definition_tags: Option<String>,
-    pub rules: String,
-    pub score: i128,
-    pub glossary: Vec<TermGlossary>,
-    pub sequence: i64,
-    pub term_tags: String,
-}
+// #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+// pub struct TermV3 {
+//     pub expression: String,
+//     pub reading: String,
+//     pub definition_tags: Option<String>,
+//     pub rules: String,
+//     pub score: i128,
+//     pub glossary: Vec<TermGlossary>,
+//     pub sequence: i64,
+//     pub term_tags: String,
+// }
 
 /// Custom `Yomichan.rs`-unique term model.
-/// Allows access to `entry` data _(ie: definitions)_ as a concatenated String instead of raw HTML.
-///
-/// The String data is simply extracted and concatenated-
-/// meaning that there is _no_ formatting; A single string of continuous text.
-///
-/// If the program _is_ able to render html, this may be preferable:
-/// See: [`TermV3`]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
-pub struct TermV4 {
-    pub expression: String,
-    pub reading: String,
-    pub definition_tags: Option<String>,
-    pub rules: String,
-    pub score: i8,
-    pub definition: String,
-    pub sequence: i128,
-    pub term_tags: String,
-}
+// #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+// pub struct TermV4 {
+//     pub expression: String,
+//     pub reading: String,
+//     pub definition_tags: Option<String>,
+//     pub rules: String,
+//     pub score: i8,
+//     pub definition: String,
+//     pub sequence: i128,
+//     pub term_tags: String,
+// }
 
 /************* Term Meta *************/
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TermMeta {
     pub expression: String,
@@ -259,7 +252,7 @@ impl<'de> Deserialize<'de> for MetaDataMatchType {
                         .map_err(serde::de::Error::custom)
                 } else {
                     Err(serde::de::Error::custom(format!(
-                        "Unknown term meta data type: {value:?}"
+                        "[yomichan-rs] Unknown term meta data type: {value:?}"
                     )))
                 }
             })
@@ -267,8 +260,8 @@ impl<'de> Deserialize<'de> for MetaDataMatchType {
     }
 }
 
-/// A helper Enum to select the mode for TermMeta data structures.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+/// The main type of [TermMeta] entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TermMetaModeType {
     Freq,
@@ -286,7 +279,6 @@ impl From<TermMetaModeType> for u8 {
 }
 
 /************* Frequency *************/
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 /// The frequency metadata of a term.
 ///
@@ -294,7 +286,6 @@ impl From<TermMetaModeType> for u8 {
 /// term_meta_bank_$ files.
 pub struct TermMetaFrequency {
     pub expression: String,
-    // Should be changed to serde_tag instead of an enum.
     /// This will be `"freq"` in the json.
     pub mode: TermMetaModeType,
     pub data: TermMetaFreqDataMatchType,
