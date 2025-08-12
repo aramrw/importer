@@ -1,4 +1,4 @@
-//! A simple wrapper for an Arc<parking_lot::RwLock<T>>;
+//! A simple wrapper for an `Arc<parking_lot::RwLock<T>>`;
 
 use std::fmt;
 use std::hash::Hash;

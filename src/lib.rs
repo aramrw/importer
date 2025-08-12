@@ -1,8 +1,14 @@
 //! # Yomichan Importer
 //!
-//! A library for importing Yomichan dictionaries into a custom database format.
+//! A library for deserializing Yomichan/Yomitan dictionary files;
 //!
 //! ## Usage
+//! Note: rayon is ≈4.33 faster [13s vs. 3s];
+//! ```toml
+//! [dependencies]
+//! # features = ["simd", "rayon", "trace"]
+//! importer = { git = "https://github.com/aramrw/importer", features = ["rayon"] }
+//! ```
 //!
 //! ```no_run
 //! use importer::import_dictionary;
@@ -48,19 +54,19 @@
 //!   113     ▷ [3]: (14) ["01989b10-661a-7822-809c-15a0375100ba", "salmuerizado", "", "odazireumlas", …]
 //!   136     ▷ [4]: (14) ["01989b10-661a-7822-809c-15b525269db6", "salobral", "", "larbolas", "", "a…", …]
 //!   159     ▷ [5]: (14) ["01989b10-661a-7822-809c-15d6a3c26560", "salobre", "", "erbolas", "", "adj", …]
-//! 
+//!
 //! ```
 //!
 //! ## Modules
 //!
-//! - `dictionary_data`: Contains the data structures for the Yomichan dictionary format.
-//! - `dictionary_database`: Contains the data structures for the database format.
-//! - `dictionary_importer`: Contains the main logic for importing the dictionary.
-//! - `errors`: Contains the error types for the library.
-//! - `ptr`: Contains a smart pointer implementation.
-//! - `structured_content`: Contains the data structures for the structured content of the dictionary entries.
-//! - `test_utils`: Contains utility functions for testing.
-//! - `utils`: Contains utility functions.
+//! - `dictionary_data`: Contains the data structures for the Yomichan dictionary format
+//! - `dictionary_database`: Contains the data structures for the database format
+//! - `dictionary_importer`: Contains the main logic for importing the dictionary
+//! - `errors`: Contains the error types for the library
+//! - `ptr`: A simple type alias for `Arc<parking_lot::RwLock>`
+//! - `structured_content`: Contains the data structures for the structured content of the dictionary entries
+//! - `test_utils`: Contains utility functions for testing
+//! - `utils`: Contains utility functions
 
 pub mod dictionary_data;
 pub mod dictionary_database;
@@ -79,9 +85,21 @@ mod importer_tests {
     use crate::{
         dictionary_database::DatabaseDictionaryData, dictionary_importer::import_dictionary,
     };
+    use tracing_subscriber;
 
     #[test]
     fn dict() {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
+        let path = std::path::Path::new("./dictionaries/jitendex-yomitan");
+        let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
+        std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
+    }
+
+    #[ignore]
+    #[test]
+    fn with_pprof() {
         #[cfg(target_os = "linux")]
         let guard = pprof::ProfilerGuardBuilder::default()
             .frequency(1000)
@@ -89,9 +107,11 @@ mod importer_tests {
             .build()
             .unwrap();
 
-        let path = std::path::Path::new("./dictionaries/kotobankesjp");
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
+        let path = std::path::Path::new("./dictionaries/jitendex-yomitan");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
-
         std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
 
         #[cfg(target_os = "linux")]

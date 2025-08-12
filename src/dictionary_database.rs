@@ -7,16 +7,18 @@ use crate::dictionary_importer::DictionarySummary;
 use crate::errors::DictionaryFileError;
 use crate::structured_content::TermGlossaryGroupType;
 use indexmap::IndexMap;
+use serde_with::serde_as;
 use serde_with::skip_serializing_none;
-use serde_with::{NoneAsEmptyString, serde_as};
+use serde_with::NoneAsEmptyString;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Deserializer as JsonDeserializer;
-use uuid::Uuid;
-
 use std::fs;
 use std::io::BufReader;
 use std::path::PathBuf;
+use uuid::Uuid;
+
+#[cfg(not(feature = "simd"))]
+use serde_json::Deserializer as JsonDeserializer;
 
 /// Media data with array buffer content.
 pub type MediaDataArrayBufferContent = MediaDataBase<Vec<u8>>;
@@ -54,16 +56,16 @@ pub struct Media<T = MediaType> {
 /// This structure matches the output of the JavaScript _createTermMeta function.
 // #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 // pub struct DatabaseTermMeta {
-//     /// Index of the original query term in the input term_list_input.
-//     pub index: usize,
-//     /// The term expression. (Corresponds to JS row.expression, named 'term' in JS output)
-//     pub term: String,
-//     /// The type of metadata (e.g., Freq, Pitch, Ipa). (Corresponds to JS row.mode)
-//     pub mode: TermMetaModeType,
-//     /// The actual metadata content. (Corresponds to JS row.data)
-//     pub data: MetaDataMatchType,
-//     /// The name of the dictionary this metadata belongs to.
-//     pub dictionary: String,
+//    /// Index of the original query term in the input term_list_input.
+//    pub index: usize,
+//    /// The term expression. (Corresponds to JS row.expression, named 'term' in JS output)
+//    pub term: String,
+//    /// The type of metadata (e.g., Freq, Pitch, Ipa). (Corresponds to JS row.mode)
+//    pub mode: TermMetaModeType,
+//    /// The actual metadata content. (Corresponds to JS row.data)
+//    pub data: MetaDataMatchType,
+//    /// The name of the dictionary this metadata belongs to.
+//    pub dictionary: String,
 // }
 
 impl From<DatabaseTermEntryTuple> for DatabaseTermEntry {
@@ -317,26 +319,47 @@ impl DatabaseMetaMatchType {
         outpath: PathBuf,
         dict_name: String,
     ) -> Result<Vec<DatabaseMetaFrequency>, DictionaryFileError> {
-        let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
-            outpath: outpath.clone(),
-            reason: reason.to_string(),
-        })?;
-        let reader = BufReader::new(file);
-
-        // Kanji metas are only frequencies
-        let mut stream =
-            JsonDeserializer::from_reader(reader).into_iter::<Vec<DatabaseMetaFrequency>>();
-
-        let mut entries = match stream.next() {
-            Some(Ok(entries)) => entries,
-            Some(Err(reason)) => {
-                return Err(crate::errors::DictionaryFileError::File {
-                    outpath,
+        #[cfg(not(feature = "simd"))]
+        let mut entries: Vec<DatabaseMetaFrequency> = {
+            let file =
+                fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+                    outpath: outpath.clone(),
                     reason: reason.to_string(),
-                });
+                })?;
+            let reader = BufReader::new(file);
+
+            // Kanji metas are only frequencies
+            let mut stream =
+                JsonDeserializer::from_reader(reader).into_iter::<Vec<DatabaseMetaFrequency>>();
+
+            match stream.next() {
+                Some(Ok(entries)) => entries,
+                Some(Err(reason)) => {
+                    return Err(crate::errors::DictionaryFileError::File {
+                        outpath,
+                        reason: reason.to_string(),
+                    });
+                }
+                None => return Err(DictionaryFileError::Empty(outpath)),
             }
-            None => return Err(DictionaryFileError::Empty(outpath)),
         };
+
+        #[cfg(feature = "simd")]
+        let mut entries: Vec<DatabaseMetaFrequency> = {
+            let mut json_string =
+                fs::read_to_string(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+                    outpath: outpath.clone(),
+                    reason: reason.to_string(),
+                })?;
+            let json_bytes = unsafe { json_string.as_bytes_mut() };
+            simd_json::from_slice(json_bytes).map_err(|err| {
+                crate::errors::DictionaryFileError::File {
+                    outpath: outpath.clone(),
+                    reason: err.to_string(),
+                }
+            })?
+        };
+
         entries.iter_mut().for_each(|entry| {
             entry.id = Uuid::now_v7().to_string();
             entry.dictionary = dict_name.clone();
@@ -348,22 +371,42 @@ impl DatabaseMetaMatchType {
         outpath: PathBuf,
         dict_name: String,
     ) -> Result<Vec<DatabaseMetaMatchType>, DictionaryFileError> {
-        let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
-            outpath: outpath.clone(),
-            reason: reason.to_string(),
-        })?;
-        let reader = BufReader::new(file);
-
-        let mut stream = JsonDeserializer::from_reader(reader).into_iter::<Vec<TermMeta>>();
-        let entries = match stream.next() {
-            Some(Ok(entries)) => entries,
-            Some(Err(reason)) => {
-                return Err(crate::errors::DictionaryFileError::File {
-                    outpath,
+        #[cfg(not(feature = "simd"))]
+        let entries: Vec<TermMeta> = {
+            let file =
+                fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+                    outpath: outpath.clone(),
                     reason: reason.to_string(),
-                });
+                })?;
+            let reader = BufReader::new(file);
+
+            let mut stream = JsonDeserializer::from_reader(reader).into_iter::<Vec<TermMeta>>();
+            match stream.next() {
+                Some(Ok(entries)) => entries,
+                Some(Err(reason)) => {
+                    return Err(crate::errors::DictionaryFileError::File {
+                        outpath,
+                        reason: reason.to_string(),
+                    });
+                }
+                None => return Err(DictionaryFileError::Empty(outpath)),
             }
-            None => return Err(DictionaryFileError::Empty(outpath)),
+        };
+
+        #[cfg(feature = "simd")]
+        let entries: Vec<TermMeta> = {
+            let mut json_string =
+                fs::read_to_string(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+                    outpath: outpath.clone(),
+                    reason: reason.to_string(),
+                })?;
+            let json_bytes = unsafe { json_string.as_bytes_mut() };
+            simd_json::from_slice(json_bytes).map_err(|err| {
+                crate::errors::DictionaryFileError::File {
+                    outpath: outpath.clone(),
+                    reason: err.to_string(),
+                }
+            })?
         };
 
         let term_metas: Vec<DatabaseMetaMatchType> = entries
@@ -659,8 +702,8 @@ pub struct DeleteDictionaryProgressData {
 // #[derive(thiserror::Error, Debug)]
 // #[error("queries returned None:\n {queries:#?}\n reason: {reason}")]
 // pub struct QueryRequestError {
-//     queries: Vec<QueryRequestMatchType>,
-//     reason: Box<native_db::db_type::Error>,
+//    queries: Vec<QueryRequestMatchType>,
+//    reason: Box<native_db::db_type::Error>,
 // }
 
 /// The type of query request.
@@ -708,7 +751,7 @@ macro_rules! collect_variant_data_ref {
                 match item_ref {
                     // `ref mut data` borrows the data mutably from within the enum variant
                     $enum_type::$variant(ref data) => Some(data), // data is &mut InnerDataType
-                    _ => None,                                    // Ignore other variants
+                    _ => None,                                   // Ignore other variants
                 }
             })
             .collect::<Vec<_>>() // Collects into Vec<&mut InnerDataType>
@@ -736,15 +779,15 @@ macro_rules! variant_to_generic_vec_mut {
 
 // #[derive(thiserror::Error, Debug)]
 // pub enum DictionaryDatabaseError {
-//     #[error("database error: {0}")]
-//     Database(#[from] Box<native_db::db_type::Error>),
-//     #[error("failed to find terms: {0}")]
-//     QueryRequest(#[from] QueryRequestError),
-//     #[error("incorrect variant(s) passed: {wrong:#?}\nexpected: {expected:#?}")]
-//     WrongQueryRequestMatchType {
-//         wrong: QueryRequestMatchType,
-//         expected: QueryRequestMatchType,
-//     },
+//    #[error("database error: {0}")]
+//    Database(#[from] Box<native_db::db_type::Error>),
+//    #[error("failed to find terms: {0}")]
+//    QueryRequest(#[from] QueryRequestError),
+//    #[error("incorrect variant(s) passed: {wrong:#?}\nexpected: {expected:#?}")]
+//    WrongQueryRequestMatchType {
+//        wrong: QueryRequestMatchType,
+//        expected: QueryRequestMatchType,
+//    },
 // }
 
 /// An exact term query request.

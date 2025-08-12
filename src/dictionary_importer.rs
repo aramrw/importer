@@ -1,42 +1,35 @@
 //! Contains the main logic for importing a Yomichan dictionary.
 
 use crate::dictionary_data::{
-    DictionaryDataTag,
-    TermGlossaryImage,
-    TermMeta,
-    YomichanIndexFile,
-    dictionary_data_util,
+    DictionaryDataTag, TermGlossaryImage, YomichanIndexFile, dictionary_data_util,
 };
 use crate::dictionary_database::{
-    DatabaseDictionaryData,
-    DatabaseKanjiEntry,
-    DatabaseMetaFrequency,
-    DatabaseMetaMatchType,
-    DatabaseTermEntry,
-    DatabaseTermEntryTuple,
-    MediaDataArrayBufferContent,
+    DatabaseDictionaryData, DatabaseKanjiEntry, DatabaseMetaFrequency, DatabaseMetaMatchType,
+    DatabaseTag, DatabaseTermEntry, DatabaseTermEntryTuple, MediaDataArrayBufferContent,
 };
+use crate::errors::{DictionaryFileError, ImportError, ImportZipError, TagBankFileError};
 use crate::structured_content::TermEntryItem;
 
-use crate::errors::{DictionaryFileError, ImportError, ImportZipError, TagBankFileError};
-
-use indexmap::IndexMap;
-
 use chrono::prelude::*;
-
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+#[cfg(not(feature = "simd"))]
 use serde_json::Deserializer as JsonDeserializer;
-
-use rayon::prelude::*;
-
+use std::fmt::Debug;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+use std::{fs, io};
 use tempfile::tempdir;
 use uuid::Uuid;
 
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
-use std::{fs, io};
+#[cfg(feature = "trace")]
+use tracing::debug;
 
-use super::dictionary_database::DatabaseTag;
+#[cfg(feature = "simd")]
+use memchr::memmem;
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 
 /// The steps of the import process.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -64,7 +57,6 @@ pub enum CompiledSchemaNames {
     /// A file containing term entries.
     TermBank,
     /// Metadata & information for terms.
-    ///
     /// This currently includes `frequency data` and `pitch accent` data.
     TermMetaBank,
     /// A file containing kanji entries.
@@ -78,10 +70,10 @@ pub enum CompiledSchemaNames {
 /// The 2 types of frequency dictionaries
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum FrequencyMode {
-    /// Frequency is based on occurrence count.
+    /// Based on occurrence count.
     #[serde(rename = "occurrence-based")]
     OccurrenceBased,
-    /// Frequency is based on rank.
+    /// Based on rank.
     #[serde(rename = "rank-based")]
     RankBased,
 }
@@ -150,7 +142,7 @@ pub enum DictionarySummaryError {
     /// The index data is invalid because `is_updatable` is false.
     #[error("invalid index data: `is_updatable` exists but is false")]
     InvalidIndexIsNotUpdatabale,
-    /// The index URL is invalid.
+    /// Generic error that can mean many things went wrong
     #[error("index url: {url} is not a valid url\nreason: {err}")]
     InvalidIndexUrl { url: String, err: url::ParseError },
 }
@@ -162,8 +154,8 @@ impl DictionarySummary {
         details: SummaryDetails,
     ) -> Result<Self, DictionarySummaryError> {
         let import_date: DateTime<Local> = Local::now();
-        let SummaryDetails { 
-            prefix_wildcard_supported,
+        let SummaryDetails {
+            prefix_wildcard_supported: _,
             counts,
             styles,
             yomitan_version,
@@ -172,7 +164,7 @@ impl DictionarySummary {
             title,
             revision,
             sequenced,
-            format,
+            format: _,
             version,
             minimum_yomitan_version,
             is_updatable,
@@ -185,7 +177,7 @@ impl DictionarySummary {
             source_language,
             target_language,
             frequency_mode,
-            tag_meta,
+            tag_meta: _,
         } = index;
 
         if yomitan_version == "0.0.0.0" {
@@ -397,10 +389,6 @@ pub struct ImportRequirementContext {
     //file_map: ArchiveFileMap,
     media: IndexMap<String, MediaDataArrayBufferContent>,
 }
-/// Deserializable type mapping a `term_bank_$i.json` file.
-pub type TermBank = Vec<TermEntryItem>;
-/// Deserializable type mapping a `term_meta_bank_$i.json` file.
-pub type TermMetaBank = Vec<TermMeta>;
 /// Deserializable type mapping a `kanji_bank_$i.json` file.
 pub type KanjiBank = Vec<DatabaseKanjiEntry>;
 
@@ -422,27 +410,64 @@ fn extract_dict_zip<P: AsRef<std::path::Path>>(
     Ok(temp_dir_path)
 }
 
-/// Imports a Yomichan dictionary from a zip file.
+/// Imports a Yomichan dictionary from a zip or folder
 ///
 /// # Arguments
 ///
-/// * `zip_path` - The path to the zip file.
+/// * `zip_path` - The path to the zip file or unzipped folder
 ///
 /// # Returns
 ///
 /// A `Result` containing the imported dictionary data or an error.
-pub fn import_dictionary<P: AsRef<Path>>(zip_path: P) -> Result<DatabaseDictionaryData, ImportError> {
+pub fn import_dictionary<P: AsRef<Path> + Debug>(
+    zip_path: P,
+) -> Result<DatabaseDictionaryData, ImportError> {
+    #[cfg(feature = "trace")]
+    debug!("{zip_path:?}");
     let data: DatabaseDictionaryData = prepare_dictionary(zip_path)?;
     Ok(data)
 }
 
-pub fn prepare_dictionary<P: AsRef<Path>>(zip_path: P) -> Result<DatabaseDictionaryData, ImportError> {
-    let mut index_path = PathBuf::new();
-    let mut tag_bank_paths: Vec<PathBuf> = Vec::new();
-    let mut kanji_meta_bank_paths: Vec<PathBuf> = Vec::new();
-    let mut kanji_bank_paths: Vec<PathBuf> = Vec::new();
-    let mut term_meta_bank_paths: Vec<PathBuf> = Vec::new();
-    let mut term_bank_paths: Vec<PathBuf> = Vec::new();
+/// Processes paths in parallel using Rayon.
+#[cfg(feature = "rayon")]
+pub fn process_paths<P, F, T, E>(paths: P, map_fn: F) -> Result<Vec<T>, E>
+where
+    P: IntoParallelIterator,
+    F: Fn(P::Item) -> Result<Vec<T>, E> + Send + Sync,
+    P::Item: Send,
+    T: Send,
+    E: Send,
+{
+    // Collect the results from each parallel task.
+    let nested_result: Result<Vec<Vec<T>>, E> = paths.into_par_iter().map(map_fn).collect();
+
+    // If successful, flatten the Vec<Vec<T>> into a single Vec<T>.
+    nested_result.map(|vec_of_vecs| vec_of_vecs.into_iter().flatten().collect())
+}
+
+/// Processes paths sequentially (fallback when rayon feature is disabled).
+#[cfg(not(feature = "rayon"))]
+pub fn process_paths<P, F, T, E>(paths: P, map_fn: F) -> Result<Vec<T>, E>
+where
+    P: IntoIterator,
+    F: Fn(P::Item) -> Result<Vec<T>, E>,
+{
+    // Collect the results from each sequential task.
+    let nested_result: Result<Vec<Vec<T>>, E> = paths.into_iter().map(map_fn).collect();
+
+    // If successful, flatten the Vec<Vec<T>> into a single Vec<T>.
+    nested_result.map(|vec_of_vecs| vec_of_vecs.into_iter().flatten().collect())
+}
+
+pub fn prepare_dictionary<P: AsRef<Path>>(
+    zip_path: P,
+) -> Result<DatabaseDictionaryData, ImportError> {
+    let mut index_path = PathBuf::with_capacity(50);
+    let mut tag_bank_paths: Vec<PathBuf> = Vec::with_capacity(1);
+    let mut kanji_meta_bank_paths: Vec<PathBuf> = Vec::with_capacity(1);
+    let mut kanji_bank_paths: Vec<PathBuf> = Vec::with_capacity(1);
+    let mut term_meta_bank_paths: Vec<PathBuf> = Vec::with_capacity(5);
+    let mut term_bank_paths: Vec<PathBuf> = Vec::with_capacity(5);
 
     read_dir_helper(
         zip_path,
@@ -457,43 +482,30 @@ pub fn prepare_dictionary<P: AsRef<Path>>(zip_path: P) -> Result<DatabaseDiction
     let index = YomichanIndexFile::convert_index_file(index_path)?;
     let dict_name = index.title.clone();
 
+    // Use the macro for all repeating blocks
     let tag_list: Vec<DatabaseTag> = convert_tag_bank_files(tag_bank_paths, &dict_name)?
         .into_iter()
         .flatten()
         .collect();
 
-    let term_list: Vec<DatabaseTermEntryTuple> = term_bank_paths
-        .into_par_iter()
-        .map(|path| convert_term_bank_file(path, &dict_name))
-        .collect::<Result<Vec<_>, _>>()? 
-        .into_iter()
-        .flatten()
-        .collect();
+    let term_list: Vec<DatabaseTermEntryTuple> = process_paths(term_bank_paths, |path| {
+        convert_term_bank_file(path, &dict_name)
+    })?;
 
-    let kanji_meta_list: Vec<DatabaseMetaFrequency> = kanji_meta_bank_paths
-        .into_par_iter()
-        .map(|path| DatabaseMetaMatchType::convert_kanji_meta_file(path, dict_name.clone()))
-        .collect::<Result<Vec<Vec<DatabaseMetaFrequency>>, DictionaryFileError>>()?
-        .into_iter()
-        .flatten()
-        .collect();
+    let kanji_meta_list: Vec<DatabaseMetaFrequency> =
+        process_paths(kanji_meta_bank_paths, |path| {
+            DatabaseMetaMatchType::convert_kanji_meta_file(path, dict_name.clone())
+        })?;
 
-    let term_meta_list: Vec<DatabaseMetaMatchType> = term_meta_bank_paths
-        .into_par_iter()
-        .map(|path| DatabaseMetaMatchType::convert_term_meta_file(path, dict_name.clone()))
-        .collect::<Result<Vec<Vec<DatabaseMetaMatchType>>, DictionaryFileError>>()?
-        .into_iter()
-        .flatten()
-        .collect();
+    let term_meta_list: Vec<DatabaseMetaMatchType> = process_paths(term_meta_bank_paths, |path| {
+        DatabaseMetaMatchType::convert_term_meta_file(path, dict_name.clone())
+    })?;
 
-    let kanji_list: Vec<DatabaseKanjiEntry> = kanji_bank_paths
-        .into_iter()
-        .map(|path| convert_kanji_bank(path, &dict_name))
-        .collect::<Result<Vec<Vec<DatabaseKanjiEntry>>, DictionaryFileError>>()?
-        .into_iter()
-        .flatten()
-        .collect();
+    let kanji_list: Vec<DatabaseKanjiEntry> = process_paths(kanji_bank_paths, |path| {
+        convert_kanji_bank(path, &dict_name)
+    })?;
 
+    // The rest of the function remains the same...
     let term_meta_counts = MetaCounts::count_term_metas(&term_meta_list);
     let kanji_meta_counts = MetaCounts::count_kanji_metas(&kanji_meta_list);
 
@@ -501,8 +513,8 @@ pub fn prepare_dictionary<P: AsRef<Path>>(zip_path: P) -> Result<DatabaseDiction
         term_list.len(),
         term_meta_list.len(),
         tag_list.len(),
-        kanji_meta_list.len(),
         kanji_list.len(),
+        kanji_meta_list.len(),
         term_meta_counts,
         kanji_meta_counts,
     );
@@ -516,7 +528,6 @@ pub fn prepare_dictionary<P: AsRef<Path>>(zip_path: P) -> Result<DatabaseDiction
         yomitan_version,
     };
     let summary = DictionarySummary::new(index, false, summary_details)?;
-    // let dictionary_options = DictionaryOptions::new(dict_name);
 
     Ok(DatabaseDictionaryData {
         tag_list,
@@ -525,7 +536,6 @@ pub fn prepare_dictionary<P: AsRef<Path>>(zip_path: P) -> Result<DatabaseDiction
         term_meta_list,
         term_list,
         summary,
-        // dictionary_options,
     })
 }
 
@@ -573,22 +583,41 @@ fn convert_kanji_bank(
     outpath: PathBuf,
     dict_name: &str,
 ) -> Result<Vec<DatabaseKanjiEntry>, DictionaryFileError> {
-    let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
-        outpath: outpath.clone(),
-        reason: reason.to_string(),
-    })?;
-    let reader = BufReader::new(file);
+    #[cfg(not(feature = "simd"))]
+    let mut entries = {
+        let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+            outpath: outpath.clone(),
+            reason: reason.to_string(),
+        })?;
+        let reader = BufReader::new(file);
 
-    let mut stream = JsonDeserializer::from_reader(reader).into_iter::<KanjiBank>();
-    let mut entries = match stream.next() {
-        Some(Ok(entries)) => entries,
-        Some(Err(reason)) => {
-            return Err(crate::errors::DictionaryFileError::File {
-                outpath,
-                reason: reason.to_string(),
-            });
+        let mut stream = JsonDeserializer::from_reader(reader).into_iter::<KanjiBank>();
+        match stream.next() {
+            Some(Ok(entries)) => entries,
+            Some(Err(reason)) => {
+                return Err(crate::errors::DictionaryFileError::File {
+                    outpath,
+                    reason: reason.to_string(),
+                });
+            }
+            None => return Err(DictionaryFileError::Empty(outpath)),
         }
-        None => return Err(DictionaryFileError::Empty(outpath)),
+    };
+
+    #[cfg(feature = "simd")]
+    let mut entries: KanjiBank = {
+        let mut json_string =
+            fs::read_to_string(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+                outpath: outpath.clone(),
+                reason: reason.to_string(),
+            })?;
+        let json_bytes = unsafe { json_string.as_bytes_mut() };
+        simd_json::from_slice(json_bytes).map_err(|err| {
+            crate::errors::DictionaryFileError::File {
+                outpath: outpath.clone(),
+                reason: err.to_string(),
+            }
+        })?
     };
 
     for item in &mut entries {
@@ -604,23 +633,50 @@ fn convert_term_bank_file(
     outpath: PathBuf,
     dict_name: &str,
 ) -> Result<Vec<DatabaseTermEntryTuple>, DictionaryFileError> {
-    let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
-        outpath: outpath.clone(),
-        reason: reason.to_string(),
-    })?;
-    let reader = BufReader::new(file);
+    #[cfg(feature = "trace")]
+    debug!(
+        "deserializing: {:?}",
+        outpath
+            .file_name()
+            .unwrap_or(Path::new("<unknown>").as_os_str())
+    );
 
-    let mut stream = JsonDeserializer::from_reader(reader).into_iter::<Vec<TermEntryItem>>();
-    let entries = match stream.next() {
-        Some(Ok(entries)) => entries,
-        Some(Err(reason)) => {
-            eprintln!( "{outpath:?} failed:\nreason: {reason}");
-            return Err(crate::errors::DictionaryFileError::File {
-                outpath,
-                reason: reason.to_string(),
-            });
+    #[cfg(not(feature = "simd"))]
+    let entries: Vec<TermEntryItem> = {
+        let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+            outpath: outpath.clone(),
+            reason: reason.to_string(),
+        })?;
+        let reader = BufReader::new(file);
+
+        let mut stream = JsonDeserializer::from_reader(reader).into_iter::<Vec<TermEntryItem>>();
+        match stream.next() {
+            Some(Ok(entries)) => entries,
+            Some(Err(reason)) => {
+                eprintln!("{outpath:?} failed:\nreason: {reason}");
+                return Err(crate::errors::DictionaryFileError::File {
+                    outpath,
+                    reason: reason.to_string(),
+                });
+            }
+            None => return Err(DictionaryFileError::Empty(outpath)),
         }
-        None => return Err(DictionaryFileError::Empty(outpath)),
+    };
+
+    #[cfg(feature = "simd")]
+    let entries: Vec<TermEntryItem> = {
+        let mut json_string =
+            fs::read_to_string(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+                outpath: outpath.clone(),
+                reason: reason.to_string(),
+            })?;
+        let json_bytes = unsafe { json_string.as_bytes_mut() };
+        simd_json::from_slice(json_bytes).map_err(|err| {
+            crate::errors::DictionaryFileError::File {
+                outpath: outpath.clone(),
+                reason: err.to_string(),
+            }
+        })?
     };
 
     // Beginning of each word/phrase/expression (entry)
@@ -668,6 +724,7 @@ fn rev_str(expression: &str) -> String {
 
 /****************** Helper Functions ******************/
 
+// This function is crazy fast
 fn read_dir_helper<P: AsRef<Path>>(
     zip_path: P,
     index: &mut PathBuf,
@@ -677,8 +734,19 @@ fn read_dir_helper<P: AsRef<Path>>(
     term_meta_banks: &mut Vec<PathBuf>,
     term_banks: &mut Vec<PathBuf>,
 ) -> Result<(), io::Error> {
+    //let instant = Instant::now();
+
+    #[cfg(not(feature = "simd"))]
     fn contains(path: &[u8], substr: &[u8]) -> bool {
+        if path.starts_with(substr) {
+            return true;
+        }
         path.windows(substr.len()).any(|w| w == substr)
+    }
+
+    #[cfg(feature = "simd")]
+    fn contains(path: &[u8], substr: &[u8]) -> bool {
+        memmem::find(path, substr).is_some()
     }
 
     fs::read_dir(&zip_path)?.try_for_each(|entry| -> Result<(), io::Error> {
@@ -701,7 +769,9 @@ fn read_dir_helper<P: AsRef<Path>>(
                 tag_banks.push(outpath_buf);
             }
         }
-
         Ok(())
-    })
+    })?;
+
+    //debug!("read_dir_helper: {:.3}ms", instant.elapsed().as_millis());
+    Ok(())
 }
