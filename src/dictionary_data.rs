@@ -5,7 +5,6 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::string::String;
 
-
 use crate::dictionary_database::TermMetaPhoneticData;
 use crate::dictionary_importer::FrequencyMode;
 use crate::errors::{DictionaryFileError, ImportError};
@@ -132,7 +131,9 @@ pub struct YomichanIndexFile {
 }
 impl YomichanIndexFile {
     /// Converts an index file to a `YomichanIndexFile` struct.
-    pub fn convert_index_file(outpath: std::path::PathBuf) -> Result<YomichanIndexFile, ImportError> {
+    pub fn convert_index_file(
+        outpath: std::path::PathBuf,
+    ) -> Result<YomichanIndexFile, ImportError> {
         let index_str =
             std::fs::read_to_string(&outpath).map_err(|e| DictionaryFileError::File {
                 outpath,
@@ -440,7 +441,7 @@ pub struct TermMetaPitchData {
 
 pub mod dictionary_data_util {
     use fancy_regex::Regex;
-    use std::sync::LazyLock;
+    use std::{sync::LazyLock};
     use url::{ParseError as UrlParseError, Url};
 
     pub static SIMPLE_VERSION_TEST: LazyLock<Regex> =
@@ -489,3 +490,4 @@ pub mod dictionary_data_util {
         Err(e)
     }
 }
+

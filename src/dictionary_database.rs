@@ -146,7 +146,7 @@ pub struct DatabaseTermEntry {
 }
 
 /// A tuple representation of a `DatabaseTermEntry`.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DatabaseTermEntryTuple(
     // id
     pub String,
@@ -807,8 +807,8 @@ pub enum QueryType {
     /// A sequence query.
     Sequence(i128),
 }
-/// so far it seems this can be refactored to use references
-/// for now keep owned so don't have to deal with lifetimes
+// so far it seems this can be refactored to use references
+// for now keep owned so don't have to deal with lifetimes
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Eq, PartialOrd, Ord, Hash)]
 pub struct GenericQueryRequest {
     pub query_type: QueryType,
@@ -842,7 +842,6 @@ pub struct MediaRequest {
 pub enum FindMultiBulkDataItemType {
     /// A string item.
     String(String),
-    // Consider adding other types if `item` in JS can be non-string for into_term_generic
 }
 impl PartialEq<FindMultiBulkDataItemType> for String {
     fn eq(&self, other: &FindMultiBulkDataItemType) -> bool {
@@ -854,7 +853,9 @@ impl PartialEq<FindMultiBulkDataItemType> for String {
 }
 
 /// A single yomichan/yomitan dictionary's file data all parsed into rust types.
-#[derive(Debug, Serialize, Deserialize)]
+/// Implements [Serialize] && [Deserialize] so it can be put into any database;
+// TODO: Show how to use it
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DatabaseDictionaryData {
     /// The list of tags.
     pub tag_list: Vec<DatabaseTag>,

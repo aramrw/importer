@@ -482,7 +482,7 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
     let index = YomichanIndexFile::convert_index_file(index_path)?;
     let dict_name = index.title.clone();
 
-    // Use the macro for all repeating blocks
+    // use `process_paths` where possible
     let tag_list: Vec<DatabaseTag> = convert_tag_bank_files(tag_bank_paths, &dict_name)?
         .into_iter()
         .flatten()

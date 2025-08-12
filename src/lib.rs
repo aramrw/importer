@@ -72,9 +72,9 @@ pub mod dictionary_data;
 pub mod dictionary_database;
 pub mod dictionary_importer;
 pub mod errors;
-pub mod ptr;
+// pub mod ptr;
 pub mod structured_content;
-pub mod test_utils;
+// pub mod test_utils;
 pub mod utils;
 
 pub use dictionary_database::DatabaseDictionaryData;
