@@ -31,7 +31,6 @@ better_default = "=1.0.5"
 parking_lot = { version = "0.12.4", features = ["arc_lock", "serde", "send_guard"] }
 # derive-where = { version = "1.5.0", features = ["serde"] }
 derivative = { version = "2.2.0", features = ["use_core"] }
-anki_direct = { path = "../anki_direct", features = ["cache"] }
 compact_str = { version = "0.9", features = ["serde"] }
 tracing = { version = "0.1.41", optional = true }
 simd-json = { version = "0.15.1", optional = true }
