@@ -529,6 +529,7 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
     };
     let summary = DictionarySummary::new(index, false, summary_details)?;
 
+    //dbg!(&term_list);
     Ok(DatabaseDictionaryData {
         tag_list,
         kanji_meta_list,
