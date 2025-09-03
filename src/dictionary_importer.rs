@@ -18,7 +18,6 @@ use serde_json::Deserializer as JsonDeserializer;
 use std::fmt::Debug;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 use std::{fs, io};
 use tempfile::tempdir;
 use uuid::Uuid;
