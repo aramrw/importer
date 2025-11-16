@@ -418,9 +418,10 @@ fn extract_dict_zip<P: AsRef<std::path::Path>>(
 /// # Returns
 ///
 /// A `Result` containing the imported dictionary data or an error.
-pub fn import_dictionary<P: AsRef<Path> + Debug>(
+pub fn import_dictionary<P: AsRef<Path>>(
     zip_path: P,
 ) -> Result<DatabaseDictionaryData, ImportError> {
+    let zip_path = zip_path.as_ref();
     #[cfg(feature = "trace")]
     debug!("{zip_path:?}");
     let data: DatabaseDictionaryData = prepare_dictionary(zip_path)?;
