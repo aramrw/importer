@@ -732,7 +732,7 @@ fn rev_str(expression: &str) -> String {
 
 // This function is crazy fast
 fn read_dir_helper<P: AsRef<Path>>(
-    zip_path: P,
+    path: P,
     index: &mut PathBuf,
     tag_banks: &mut Vec<PathBuf>,
     kanji_meta_banks: &mut Vec<PathBuf>,
@@ -740,44 +740,37 @@ fn read_dir_helper<P: AsRef<Path>>(
     term_meta_banks: &mut Vec<PathBuf>,
     term_banks: &mut Vec<PathBuf>,
 ) -> Result<(), io::Error> {
-    //let instant = Instant::now();
-
-    #[cfg(not(feature = "simd"))]
-    fn contains(path: &[u8], substr: &[u8]) -> bool {
-        if path.starts_with(substr) {
-            return true;
-        }
-        path.windows(substr.len()).any(|w| w == substr)
-    }
-
-    #[cfg(feature = "simd")]
-    fn contains(path: &[u8], substr: &[u8]) -> bool {
-        memmem::find(path, substr).is_some()
-    }
-
-    fs::read_dir(&zip_path)?.try_for_each(|entry| -> Result<(), io::Error> {
+    for entry in fs::read_dir(path)? {
         let entry = entry?;
-        let outpath_buf = entry.path();
-        let outpath = outpath_buf.as_os_str().as_encoded_bytes();
-
-        if outpath.iter().last() != Some(&b'/') {
-            if contains(outpath, b"term_bank") {
-                term_banks.push(outpath_buf);
-            } else if contains(outpath, b"index.json") {
-                *index = outpath_buf;
-            } else if contains(outpath, b"term_meta_bank") {
-                term_meta_banks.push(outpath_buf);
-            } else if contains(outpath, b"kanji_meta_bank") {
-                kanji_meta_banks.push(outpath_buf);
-            } else if contains(outpath, b"kanji_bank") {
-                kanji_banks.push(outpath_buf);
-            } else if contains(outpath, b"tag_bank") {
-                tag_banks.push(outpath_buf);
+        let path = entry.path();
+        
+        if path.is_dir() {
+            read_dir_helper(
+                &path,
+                index,
+                tag_banks,
+                kanji_meta_banks,
+                kanji_banks,
+                term_meta_banks,
+                term_banks,
+            )?;
+        } else {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            
+            if file_name.contains("term_bank") {
+                term_banks.push(path);
+            } else if file_name.contains("index.json") {
+                *index = path;
+            } else if file_name.contains("term_meta_bank") {
+                term_meta_banks.push(path);
+            } else if file_name.contains("kanji_meta_bank") {
+                kanji_meta_banks.push(path);
+            } else if file_name.contains("kanji_bank") {
+                kanji_banks.push(path);
+            } else if file_name.contains("tag_bank") {
+                tag_banks.push(path);
             }
         }
-        Ok(())
-    })?;
-
-    //debug!("read_dir_helper: {:.3}ms", instant.elapsed().as_millis());
+    }
     Ok(())
 }

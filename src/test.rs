@@ -44,4 +44,44 @@ mod unit_test {
         let data = import_dictionary(&zip_path).expect("Failed to import zip");
         assert_eq!(data.summary.title, "小学館 西和中辞典 第2版");
     }
+
+    #[test]
+    fn import_zip_nested() {
+        use crate::dictionary_importer::import_dictionary;
+        use std::fs::{self, File};
+        use std::io::Write;
+        use tempfile::tempdir;
+        use zip::write::SimpleFileOptions;
+
+        let source_dir = std::path::Path::new("./dictionaries/kotobankesjp");
+        let temp_zip_dir = tempdir().unwrap();
+        let zip_path = temp_zip_dir.path().join("test_dict_nested.zip");
+
+        // Create a zip file where files are inside a subfolder
+        let file = File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+
+        let options = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .unix_permissions(0o755);
+
+        let nested_folder = "my_custom_folder/";
+        zip.add_directory(nested_folder, options).unwrap();
+
+        for entry in std::fs::read_dir(source_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let name = path.file_name().unwrap().to_str().unwrap();
+
+            if path.is_file() {
+                zip.start_file(format!("{}{}", nested_folder, name), options).unwrap();
+                let content = std::fs::read(path).unwrap();
+                zip.write_all(&content).unwrap();
+            }
+        }
+        zip.finish().unwrap();
+
+        let data = import_dictionary(&zip_path).expect("Failed to import nested zip");
+        assert_eq!(data.summary.title, "小学館 西和中辞典 第2版");
+    }
 }
