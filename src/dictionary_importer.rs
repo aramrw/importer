@@ -393,7 +393,7 @@ pub type KanjiBank = Vec<DatabaseKanjiEntry>;
 
 fn extract_dict_zip<P: AsRef<std::path::Path>>(
     zip_path: P,
-) -> Result<std::path::PathBuf, ImportZipError> {
+) -> Result<(tempfile::TempDir, std::path::PathBuf), ImportZipError> {
     let temp_dir = tempdir()?;
     let temp_dir_path = temp_dir.path().to_owned();
     let temp_dir_path_clone = temp_dir_path.clone();
@@ -401,12 +401,10 @@ fn extract_dict_zip<P: AsRef<std::path::Path>>(
     {
         let file = fs::File::open(zip_path)?;
         let mut archive = zip::ZipArchive::new(file)?;
-        let extract_handle = std::thread::spawn(move || archive.extract(temp_dir_path_clone));
-        extract_handle.join().unwrap().unwrap();
+        archive.extract(temp_dir_path_clone)?;
     }
 
-    temp_dir.close()?;
-    Ok(temp_dir_path)
+    Ok((temp_dir, temp_dir_path))
 }
 
 /// Imports a Yomichan dictionary from a zip or folder
