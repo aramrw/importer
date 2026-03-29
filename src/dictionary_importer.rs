@@ -411,19 +411,26 @@ fn extract_dict_zip<P: AsRef<std::path::Path>>(
 ///
 /// # Arguments
 ///
-/// * `zip_path` - The path to the zip file or unzipped folder
+/// * `path` - The path to the zip file or unzipped folder
 ///
 /// # Returns
 ///
 /// A `Result` containing the imported dictionary data or an error.
 pub fn import_dictionary<P: AsRef<Path>>(
-    zip_path: P,
+    path: P,
 ) -> Result<DatabaseDictionaryData, ImportError> {
-    let zip_path = zip_path.as_ref();
+    let path = path.as_ref();
     #[cfg(feature = "trace")]
-    debug!("{zip_path:?}");
-    let data: DatabaseDictionaryData = prepare_dictionary(zip_path)?;
-    Ok(data)
+    debug!("{path:?}");
+
+    if path.is_dir() {
+        let data: DatabaseDictionaryData = prepare_dictionary(path)?;
+        Ok(data)
+    } else {
+        let (_temp_dir, extracted_path) = extract_dict_zip(path)?;
+        let data: DatabaseDictionaryData = prepare_dictionary(extracted_path)?;
+        Ok(data)
+    }
 }
 
 /// Processes paths in parallel using Rayon.
