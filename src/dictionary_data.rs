@@ -9,6 +9,7 @@ use crate::dictionary_database::TermMetaPhoneticData;
 use crate::dictionary_importer::FrequencyMode;
 use crate::errors::{DictionaryFileError, ImportError};
 use crate::structured_content::ImageElement;
+use crate::utils::_convert_string_to_number;
 
 trait StrMacro {
     fn from_static_str(s: &'static ::core::primitive::str) -> Self;
@@ -354,6 +355,30 @@ pub enum GenericFreqData {
     /// Frequency data as a string.
     String(String),
 }
+impl GenericFreqData {
+    pub fn get_frequency_info(&self) -> FrequencyInfo {
+        match self {
+            GenericFreqData::Object(obj) => FrequencyInfo {
+                frequency: obj.value,
+                display_value: obj.display_value.clone(),
+                display_value_parsed: false,
+            },
+            GenericFreqData::Integer(num) => FrequencyInfo {
+                frequency: *num,
+                display_value: None,
+                display_value_parsed: false,
+            },
+            GenericFreqData::String(s_val) => {
+                let numeric_value = _convert_string_to_number(&s_val);
+                FrequencyInfo {
+                    frequency: numeric_value,
+                    display_value: Some(s_val.clone()),
+                    display_value_parsed: true,
+                }
+            }
+        }
+    }
+}
 
 /// Frequency data as an object.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -397,7 +422,7 @@ pub struct TermMetaPitch {
     data: TermMetaPitchData,
 }
 
-/// Helper enum to match [TermMetaPitchAccent] data more accurately.
+// Helper enum to match [TermMetaPitchAccent] data more accurately.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum VecNumOrNum {
     /// A vector of numbers.
@@ -441,7 +466,7 @@ pub struct TermMetaPitchData {
 
 pub mod dictionary_data_util {
     use fancy_regex::Regex;
-    use std::{sync::LazyLock};
+    use std::sync::LazyLock;
     use url::{ParseError as UrlParseError, Url};
 
     pub static SIMPLE_VERSION_TEST: LazyLock<Regex> =
@@ -490,4 +515,3 @@ pub mod dictionary_data_util {
         Err(e)
     }
 }
-

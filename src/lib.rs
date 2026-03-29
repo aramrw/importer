@@ -23,7 +23,7 @@
 //! ```
 //!
 //! #### Output
-//! ```
+//! ```text
 //!    1 ▼ (6) {tag_list: […], kanji_meta_list: [], kanji_list: [], term_meta_list: [], term_list: […], …}
 //!     2   ▷ tag_list: (4) [{…}, {…}, {…}, {…}]
 //!    40     kanji_meta_list: []
@@ -72,6 +72,7 @@ pub mod dictionary_data;
 pub mod dictionary_database;
 pub mod dictionary_importer;
 pub mod errors;
+pub mod test;
 // pub mod ptr;
 pub mod structured_content;
 // pub mod test_utils;
@@ -92,7 +93,7 @@ mod importer_tests {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
             .init();
-        let path = std::path::Path::new("./dictionaries/jitendex-yomitan");
+        let path = std::path::Path::new("./dictionaries/kotobankesjp");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
         std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
     }

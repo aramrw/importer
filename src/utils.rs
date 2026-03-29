@@ -2,6 +2,11 @@
 
 use indexmap::IndexMap;
 
+pub fn _convert_string_to_number(s: &str) -> i128 {
+        s.parse::<i128>().unwrap_or(-1)
+}
+
+
 /// A trait for types/collections that can be empty.
 ///
 /// # Usage
