@@ -37,7 +37,7 @@ simd-json = { version = "0.15.1", optional = true }
 memchr = { version = "2.7", optional = true }
 tracing-subscriber = "0.3.19"
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 pprof = { version = "0.13", features = ["flamegraph"] }
 
 [dev-dependencies]
