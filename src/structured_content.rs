@@ -31,9 +31,11 @@ pub struct StructuredContent {
 }
 
 /// A match type to deserialize any `Content` type.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ContentMatchType {
+    /// A string.
+    String(CompactString),
     /// A single html element.
     /// See: [`HtmlTag`].
     ///
@@ -44,56 +46,6 @@ pub enum ContentMatchType {
     /// See: [`HtmlTag`].
     ///
     Content(Vec<ContentMatchType>),
-    /// A string.
-    String(CompactString),
-}
-
-impl<'de> Deserialize<'de> for ContentMatchType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Step 1: Deserialize into a generic Value.
-        let value = serde_json::Value::deserialize(deserializer).map_err(|e| {
-            de::Error::custom(format!(
-                "Failed to deserialize into intermediate Value: {e}",
-            ))
-        })?;
-
-        // errors from each attempt
-        let mut errors = Vec::with_capacity(3);
-
-        // Try as Element (expects an object or array representing a tag).
-        if value.is_object() || value.is_array() {
-            match Element::deserialize(value.clone()) {
-                Ok(element) => return Ok(ContentMatchType::Element(Box::new(element))),
-                Err(e) => errors.push(format!("[Attempted as Element] {e}")),
-            }
-        }
-
-        // Try as Vec<ContentMatchType> (expects an array).
-        if value.is_array() {
-            match <Vec<ContentMatchType>>::deserialize(value.clone()) {
-                Ok(content_vec) => return Ok(ContentMatchType::Content(content_vec)),
-                Err(e) => errors.push(format!("[Attempted as Vec<ContentMatchType>] {e}")),
-            }
-        }
-
-        // Try as String.
-        if value.is_string() {
-            match String::deserialize(value.clone()) {
-                Ok(s) => return Ok(ContentMatchType::String(s.into())),
-                Err(e) => errors.push(format!("[Attempted as String] {e}")),
-            }
-        }
-
-        // Step 5: If all attempts failed, report everything.
-        Err(de::Error::custom(format!(
-            "Data did not match any variant of ContentMatchType (Element, Vec, or String).\n\nProblematic value: {}\n\nErrors:\n-{}",
-            value,
-            errors.join("\n-")
-        )))
-    }
 }
 
 /// `yomichan_rs` unique struct.
@@ -121,7 +73,7 @@ pub enum TermGlossaryGroupType {
 }
 
 /// A term glossary entry.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TermGlossary {
     /// A content entry.
@@ -301,97 +253,14 @@ pub struct TermGlossaryDeinflection {
     pub rules: Vec<CompactString>,
 }
 
-impl<'de> Deserialize<'de> for TermGlossary {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Deserialize into a generic Value to inspect it multiple times.
-        let value = serde_json::Value::deserialize(deserializer).map_err(de::Error::custom)?;
-
-        // Attempt to parse as both variants.
-        let deinflection_result = TermGlossaryDeinflection::deserialize(value.clone());
-        let content_result = TermGlossaryContent::deserialize(value.clone());
-
-        match (deinflection_result, content_result) {
-            // Case 1: Parsed as both (the ambiguity we need to solve).
-            (Ok(deinflection), Ok(content)) => {
-                // This is where we apply our tie-breaker rule.
-                // We inspect the raw `value` that caused the ambiguity.
-                // If it's an array and its first element is the specific string "structured-content",
-                // we definitively choose the `Content` variant.
-                if let Some(arr) = value.as_array() {
-                    if let Some(first_elem) = arr.first() {
-                        if first_elem.as_str() == Some("structured-content") {
-                            // This is the binary representation of a StructuredContent enum,
-                            // so we MUST choose the Content path.
-                            return Ok(TermGlossary::Content(content));
-                        }
-                    }
-                }
-
-                // If the tie-breaker rule doesn't apply (e.g., it was some other
-                // ambiguous structure), we have to make a choice. Prioritizing
-                // Content might be a reasonable default if such a case could exist.
-                // a panic might be a better option
-                Ok(TermGlossary::Content(content))
-            }
-
-            (Ok(deinflection), Err(_)) => Ok(TermGlossary::Deinflection(deinflection)),
-            (Err(_), Ok(content)) => Ok(TermGlossary::Content(content)),
-
-            // Case 4: Failed to parse as either.
-            (Err(de), Err(co)) => Err(de::Error::custom(format!(
-                "Data did not match any variant of TermGlossary.\n    Deinflection Error: {de}\n    Content Error: {co}\n    Value: {value:#?}"
-            ))),
-        }
-    }
-}
-
 /// The content of a term glossary.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TermGlossaryContent {
-    /// Tagged content.
-    Tagged(TaggedContent),
     /// A string.
     String(CompactString),
-}
-
-impl<'de> Deserialize<'de> for TermGlossaryContent {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Step 1: Deserialize into a generic Value.
-        let value = serde_json::Value::deserialize(deserializer).map_err(|e| {
-            de::Error::custom(format!(
-                "Failed to deserialize into intermediate Value: {e}"
-            ))
-        })?;
-
-        // Step 2: Try to deserialize as `TaggedContent` (expects a map or a sequence).
-        // We'll capture the error if it fails.
-        let tagged_error = match TaggedContent::deserialize(value.clone()) {
-            Ok(tagged) => return Ok(TermGlossaryContent::Tagged(tagged)),
-            Err(e) => e.to_string(), // Keep the error message
-        };
-
-        // Step 3: Try to deserialize as `String`. This is where your error likely originates.
-        // If `value` is a sequence, this will fail with "invalid type: sequence, expected a string".
-        let string_error = match String::deserialize(value.clone()) {
-            Ok(s) => return Ok(TermGlossaryContent::String(s.into())),
-            Err(e) => e.to_string(), // Keep the error message
-        };
-
-        // Step 4: If both attempts failed, report everything.
-        Err(de::Error::custom(format!(
-            "Data did not match any variant of TermGlossaryContent (Tagged or String).\n\nProblematic value: {}\n\nAttempt 1 (as TaggedContent) failed with: {}\nAttempt 2 (as String) failed with: {}",
-            serde_json::to_string_pretty(&value).unwrap_or_else(|_| format!("{value:?}")),
-            tagged_error,
-            string_error
-        )))
-    }
+    /// Tagged content.
+    Tagged(TaggedContent),
 }
 
 /// Tagged content.
@@ -638,7 +507,7 @@ pub enum VerticalAlign {
     /// Superscript alignment.
     Super,
     /// Text top alignment.
-    #[serde(rename = "text-bottom")]
+    #[serde(rename = "text-top")]
     TextTop,
     /// Text bottom alignment.
     #[serde(rename = "text-bottom")]
@@ -842,6 +711,7 @@ fn deserialize_element_from_value(value: Value) -> Result<Element, String> {
         obj.get("tag")
             .and_then(Value::as_str)
             .ok_or("Element map is missing a 'tag' field")?
+            .to_string()
     } else if let Some(arr) = value.as_array() {
         if arr.is_empty() {
             return Err("Element array cannot be empty".to_string());
@@ -849,6 +719,7 @@ fn deserialize_element_from_value(value: Value) -> Result<Element, String> {
         arr[0]
             .as_str()
             .ok_or("First element of Element array must be a tag string".to_string())?
+            .to_string()
     } else {
         return Err(format!(
             "Element must be a map or an array, but was: {value:?}"
@@ -856,18 +727,18 @@ fn deserialize_element_from_value(value: Value) -> Result<Element, String> {
     };
 
     // Use `serde_json::from_value` to deserialize into the correct concrete struct.
-    // We must clone `value` because `from_value` consumes it.
-    let result = match tag_str {
-        "a" => serde_json::from_value(value.clone()).map(Element::Link),
+    // We NO LONGER clone `value` here. `from_value` consumes it directly!
+    let result = match tag_str.as_str() {
+        "a" => serde_json::from_value(value).map(Element::Link),
         "div" | "span" | "ol" | "ul" | "li" | "details" | "summary" => {
-            serde_json::from_value(value.clone()).map(Element::Styled)
+            serde_json::from_value(value).map(Element::Styled)
         }
         "ruby" | "rt" | "rp" | "t" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "tb" | "tf" => {
-            serde_json::from_value(value.clone()).map(Element::Unstyled)
+            serde_json::from_value(value).map(Element::Unstyled)
         }
-        "td" | "th" => serde_json::from_value(value.clone()).map(Element::Table),
-        "br" => serde_json::from_value(value.clone()).map(Element::LineBreak),
-        "img" => serde_json::from_value(value.clone()).map(Element::Image),
+        "td" | "th" => serde_json::from_value(value).map(Element::Table),
+        "br" => serde_json::from_value(value).map(Element::LineBreak),
+        "img" => serde_json::from_value(value).map(Element::Image),
         unknown_tag => {
             // Replicate the behavior of `Error::unknown_variant` by creating a useful error message.
             let known_variants = &[
@@ -885,7 +756,7 @@ fn deserialize_element_from_value(value: Value) -> Result<Element, String> {
     // Add the detailed final error message, which is very helpful for debugging.
     result.map_err(|e| {
         format!(
-            "Failed to deserialize Element with tag '{tag_str}'. Error: {e}. Original value was: {value}"
+            "Failed to deserialize Element with tag '{tag_str}'. Error: {e}"
         )
     })
 }
@@ -1027,16 +898,18 @@ impl<'de> Deserialize<'de> for TableElement {
                         continue; // Go to next item in sequence
                     }
 
-                    // Try to see if it's a style object
-                    if let Ok(s) = serde_json::from_value::<StructuredContentStyle>(value.clone()) {
-                        style = Some(s);
-                        continue;
-                    }
+                    if value.is_object() {
+                        // Try to see if it's a style object
+                        if let Ok(s) = serde_json::from_value::<StructuredContentStyle>(value.clone()) {
+                            style = Some(s);
+                            continue;
+                        }
 
-                    // Try to see if it's a data object
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
-                        data = Some(d);
-                        continue;
+                        // Try to see if it's a data object
+                        if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
+                            data = Some(d);
+                            continue;
+                        }
                     }
 
                     // If it's none of the above, it must be the content.
@@ -1381,12 +1254,14 @@ impl<'de> Deserialize<'de> for StyledElement {
                         continue;
                     }
 
-                    // Is it a map? -> `data`
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
-                        if data.is_none() {
-                            data = Some(d);
+                    if value.is_object() {
+                        // Is it a map? -> `data`
+                        if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
+                            if data.is_none() {
+                                data = Some(d);
+                            }
+                            continue;
                         }
-                        continue;
                     }
 
                     // Is it a string that isn't content yet? -> `title`
@@ -1508,11 +1383,13 @@ impl<'de> Deserialize<'de> for UnstyledElement {
                 let mut data = None;
 
                 while let Some(value) = seq.next_element::<Value>()? {
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
-                        if data.is_none() {
-                            data = Some(d);
+                    if value.is_object() {
+                        if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
+                            if data.is_none() {
+                                data = Some(d);
+                            }
+                            continue;
                         }
-                        continue;
                     }
                     if content.is_none() {
                         content = Some(serde_json::from_value(value).map_err(de::Error::custom)?);
