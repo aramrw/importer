@@ -284,7 +284,7 @@ pub struct DatabaseTag {
     /// The category of the tag.
     pub category: String,
     /// The order of the tag.
-    pub order: u64,
+    pub order: i64,
     /// The notes of the tag.
     pub notes: String,
     /// The score of the tag.

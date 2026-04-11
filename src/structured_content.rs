@@ -305,20 +305,20 @@ impl<'de> Deserialize<'de> for TaggedContent {
             {
                 // The first element is the tag string.
                 let tag: String = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &"a [tag, payload] sequence"))?;
 
                 // The second element is the payload, which depends on the tag.
                 let content = match tag.as_str() {
                     "text" => {
                         let text: String = seq
-                            .next_element()? 
+                            .next_element()?
                             .ok_or_else(|| de::Error::invalid_length(1, &"a text payload"))?;
                         TaggedContent::Text { text: text.into() }
                     }
                     "img" => {
                         let image_payload: Box<ImageElement> = seq
-                            .next_element()? 
+                            .next_element()?
                             .ok_or_else(|| de::Error::invalid_length(1, &"an image payload"))?;
                         TaggedContent::Image(image_payload)
                     }
@@ -345,42 +345,43 @@ impl<'de> Deserialize<'de> for TaggedContent {
             }
 
             /// Handles the JSON format: `{"type": "tag", ...}`
-            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: de::MapAccess<'de>,
             {
-                // To handle an internally tagged enum from a map, the easiest
-                // way is to deserialize into a generic value and then use
-                // from_value, which re-applies Serde's `#[serde(tag = "...")]` logic.
-                let value = 
-                    serde_json::Value::deserialize(de::value::MapAccessDeserializer::new(map))?;
+                let mut tag = None;
+                let mut content = None;
+                let mut text = None;
+                let mut img = None;
 
-                // This helper struct allows us to leverage Serde's derived logic for internally tagged enums.
-                #[derive(Deserialize)]
-                #[serde(tag = "type")]
-                enum Helper {
-                    #[serde(rename = "text")]
-                    Text { text: CompactString },
-                    #[serde(rename = "img")]
-                    Image(Box<ImageElement>),
-                    #[serde(rename = "structured-content")]
-                    StructuredContent {
-                        #[serde(rename = "content")]
-                        content: ContentMatchType,
-                    },
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "type" => tag = Some(map.next_value::<String>()?),
+                        "content" => content = Some(map.next_value()?),
+                        "text" => text = Some(map.next_value()?),
+                        "img" => img = Some(map.next_value()?),
+                        _ => {
+                            let _: de::IgnoredAny = map.next_value()?;
+                        }
+                    }
                 }
 
-                // Deserialize from the intermediate `serde_json::Value`.
-                let helper = Helper::deserialize(value).map_err(de::Error::custom)?;
-
-                // Convert from the helper enum back to our main TaggedContent enum.
-                Ok(match helper {
-                    Helper::Text { text } => TaggedContent::Text { text },
-                    Helper::Image(img) => TaggedContent::Image(img),
-                    Helper::StructuredContent { content } => {
-                        TaggedContent::StructuredContent { content }
-                    }
-                })
+                let tag = tag.ok_or_else(|| de::Error::missing_field("type"))?;
+                match tag.as_str() {
+                    "text" => Ok(TaggedContent::Text {
+                        text: text.ok_or_else(|| de::Error::missing_field("text"))?,
+                    }),
+                    "img" => Ok(TaggedContent::Image(
+                        img.ok_or_else(|| de::Error::missing_field("img"))?,
+                    )),
+                    "structured-content" => Ok(TaggedContent::StructuredContent {
+                        content: content.ok_or_else(|| de::Error::missing_field("content"))?,
+                    }),
+                    _ => Err(de::Error::unknown_variant(
+                        &tag,
+                        &["text", "img", "structured-content"],
+                    )),
+                }
             }
         }
 
@@ -678,16 +679,42 @@ impl<'de> Visitor<'de> for ElementVisitor {
     where
         A: SeqAccess<'de>,
     {
-        // Here we recreate your logic for the array format.
-        // The idea is to deserialize the entire sequence into a serde_json::Value
-        // ONLY because the rest of your logic depends on it. A more performant
-        // solution would deserialize field-by-field.
-        let value_seq: Vec<Value> = 
-            de::Deserialize::deserialize(de::value::SeqAccessDeserializer::new(&mut seq))?;
-        let value = Value::Array(value_seq);
+        // Read the tag first.
+        let tag: String = seq
+            .next_element()?
+            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
-        // Now you can call a helper function with your existing logic
-        deserialize_element_from_value(value).map_err(de::Error::custom)
+        match tag.as_str() {
+            "a" => Ok(Element::Link(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            "div" | "span" | "ol" | "ul" | "li" | "details" | "summary" => {
+                Ok(Element::Styled(de::Deserialize::deserialize(
+                    de::value::SeqAccessDeserializer::new(seq),
+                )?))
+            }
+            "ruby" | "rt" | "rp" | "t" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "tb"
+            | "tf" => Ok(Element::Unstyled(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            "td" | "th" => Ok(Element::Table(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            "br" => Ok(Element::LineBreak(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            "img" => Ok(Element::Image(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            unknown_tag => {
+                let known_variants = &[
+                    "a", "div", "span", "ol", "ul", "li", "details", "summary", "ruby", "rt", "rp",
+                    "t", "table", "thead", "tbody", "tfoot", "tr", "tb", "tf", "td", "th", "br",
+                    "img",
+                ];
+                Err(de::Error::unknown_variant(unknown_tag, known_variants))
+            }
+        }
     }
 
     // This method will be called by `serde_json` when it sees an object.
@@ -695,70 +722,56 @@ impl<'de> Visitor<'de> for ElementVisitor {
     where
         A: MapAccess<'de>,
     {
-        // Same principle: reconstruct a `serde_json::Value` and use your existing logic.
-        let value_map: serde_json::Map<String, Value> = 
-            de::Deserialize::deserialize(de::value::MapAccessDeserializer::new(&mut map))?;
-        let value = Value::Object(value_map);
+        // For maps, we need to find the "tag" field.
+        // If it's not the first field, we have to buffer the other fields.
+        // However, for performance, we can try to optimize for the common case where tag is first.
+        let mut tag = None;
+        let mut fields = serde_json::Map::new();
 
-        // Call the same helper function
-        deserialize_element_from_value(value).map_err(de::Error::custom)
+        while let Some(key) = map.next_key::<String>()? {
+            if key == "tag" {
+                tag = Some(map.next_value::<String>()?);
+            } else {
+                fields.insert(key, map.next_value()?);
+            }
+        }
+
+        let tag_str = tag.ok_or_else(|| de::Error::missing_field("tag"))?;
+        let value = Value::Object(fields);
+
+        // Here we still use Value for the remaining fields of the map to avoid complex buffering,
+        // but we've avoided double-parsing the tag and the outer structure.
+        // Further optimization can be done in Task 2.
+        match tag_str.as_str() {
+            "a" => Ok(Element::Link(
+                LinkElement::deserialize_with_tag(tag_str, value).map_err(de::Error::custom)?,
+            )),
+            "div" | "span" | "ol" | "ul" | "li" | "details" | "summary" => Ok(Element::Styled(
+                StyledElement::deserialize_with_tag(tag_str, value).map_err(de::Error::custom)?,
+            )),
+            "ruby" | "rt" | "rp" | "t" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "tb"
+            | "tf" => Ok(Element::Unstyled(
+                UnstyledElement::deserialize_with_tag(tag_str, value).map_err(de::Error::custom)?,
+            )),
+            "td" | "th" => Ok(Element::Table(
+                TableElement::deserialize_with_tag(tag_str, value).map_err(de::Error::custom)?,
+            )),
+            "br" => Ok(Element::LineBreak(
+                LineBreak::deserialize_with_tag(tag_str, value).map_err(de::Error::custom)?,
+            )),
+            "img" => Ok(Element::Image(
+                ImageElement::deserialize_with_tag(tag_str, value).map_err(de::Error::custom)?,
+            )),
+            unknown_tag => {
+                let known_variants = &[
+                    "a", "div", "span", "ol", "ul", "li", "details", "summary", "ruby", "rt", "rp",
+                    "t", "table", "thead", "tbody", "tfoot", "tr", "tb", "tf", "td", "th", "br",
+                    "img",
+                ];
+                Err(de::Error::unknown_variant(unknown_tag, known_variants))
+            }
+        }
     }
-}
-
-fn deserialize_element_from_value(value: Value) -> Result<Element, String> {
-    // Determine the tag from either the map or array structure.
-    let tag_str = if let Some(obj) = value.as_object() {
-        obj.get("tag")
-            .and_then(Value::as_str)
-            .ok_or("Element map is missing a 'tag' field")?
-            .to_string()
-    } else if let Some(arr) = value.as_array() {
-        if arr.is_empty() {
-            return Err("Element array cannot be empty".to_string());
-        }
-        arr[0]
-            .as_str()
-            .ok_or("First element of Element array must be a tag string".to_string())?
-            .to_string()
-    } else {
-        return Err(format!(
-            "Element must be a map or an array, but was: {value:?}"
-        ));
-    };
-
-    // Use `serde_json::from_value` to deserialize into the correct concrete struct.
-    // We NO LONGER clone `value` here. `from_value` consumes it directly!
-    let result = match tag_str.as_str() {
-        "a" => serde_json::from_value(value).map(Element::Link),
-        "div" | "span" | "ol" | "ul" | "li" | "details" | "summary" => {
-            serde_json::from_value(value).map(Element::Styled)
-        }
-        "ruby" | "rt" | "rp" | "t" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "tb" | "tf" => {
-            serde_json::from_value(value).map(Element::Unstyled)
-        }
-        "td" | "th" => serde_json::from_value(value).map(Element::Table),
-        "br" => serde_json::from_value(value).map(Element::LineBreak),
-        "img" => serde_json::from_value(value).map(Element::Image),
-        unknown_tag => {
-            // Replicate the behavior of `Error::unknown_variant` by creating a useful error message.
-            let known_variants = &[
-                "a", "div", "span", "ol", "ul", "li", "details", "summary", "ruby", "rt", "rp",
-                "t", "table", "thead", "tbody", "tfoot", "tr", "tb", "tf", "td", "th", "br", "img",
-            ];
-            // We need to return a `Result<_, serde_json::Error>` to match the other arms.
-            // A simple way is to create an `io::Error`.
-            return Err(format!(
-                "unknown variant `{unknown_tag}`, expected one of {known_variants:?}"
-            ));
-        }
-    };
-
-    // Add the detailed final error message, which is very helpful for debugging.
-    result.map_err(|e| {
-        format!(
-            "Failed to deserialize Element with tag '{tag_str}'. Error: {e}"
-        )
-    })
 }
 
 impl<'de> Deserialize<'de> for Element {
@@ -1166,11 +1179,59 @@ pub struct ImageElement {
     collapsible: Option<bool>,
 }
 
-// ===================================================================
-//
-//          MANUAL DESERIALIZE IMPLEMENTATIONS FOR ELEMENTS
-//
-// ===================================================================
+impl LinkElement {
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl StyledElement {
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl UnstyledElement {
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl TableElement {
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl LineBreak {
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl ImageElement {
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
 //
 // This section provides manual `Deserialize` implementations for all
 // element structs. This is necessary because the database can store

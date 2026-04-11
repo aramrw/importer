@@ -172,7 +172,7 @@ pub struct DictionaryDataTag {
     /// Category for the tag.
     pub category: String,
     /// Sorting order for the tag.
-    pub order: u64,
+    pub order: i64,
     /// Notes for the tag.
     pub notes: String,
     /// Score used to determine popularity.
