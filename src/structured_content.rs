@@ -31,8 +31,7 @@ pub struct StructuredContent {
 }
 
 /// A match type to deserialize any `Content` type.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum ContentMatchType {
     /// A string.
     String(CompactString),
@@ -46,6 +45,73 @@ pub enum ContentMatchType {
     /// See: [`HtmlTag`].
     ///
     Content(Vec<ContentMatchType>),
+}
+
+impl<'de> Deserialize<'de> for ContentMatchType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ContentMatchTypeVisitor;
+
+        impl<'de> Visitor<'de> for ContentMatchTypeVisitor {
+            type Value = ContentMatchType;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string, an array of content, or a structured content object")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ContentMatchType::String(v.to_compact_string()))
+            }
+
+            fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let vec = Vec::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(ContentMatchType::Content(vec))
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let value: serde_json::Value =
+                    de::Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))?;
+
+                if value.get("tag").is_some() {
+                    let element: Element = serde_json::from_value(value).map_err(de::Error::custom)?;
+                    Ok(ContentMatchType::Element(Box::new(element)))
+                } else if value.get("type").and_then(|v| v.as_str()) == Some("structured-content") {
+                    // This is a StructuredContent object inside a ContentMatchType
+                    let sc: StructuredContent =
+                        serde_json::from_value(value).map_err(de::Error::custom)?;
+                    Ok(ContentMatchType::Element(Box::new(Element::Styled(
+                        StyledElement {
+                            tag: HtmlTag::Div,
+                            content: Some(sc.content),
+                            data: None,
+                            style: None,
+                            title: None,
+                            open: None,
+                            lang: None,
+                        },
+                    ))))
+                } else {
+                    Err(de::Error::custom(format!(
+                        "Unknown map structure for ContentMatchType: {}",
+                        value
+                    )))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(ContentMatchTypeVisitor)
+    }
 }
 
 /// `yomichan_rs` unique struct.
@@ -1721,5 +1787,70 @@ impl<'de> Deserialize<'de> for LineBreak {
         }
 
         deserializer.deserialize_any(LineBreakVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_content_match_type_deserialization() {
+        // Test String
+        let json_str = json!("hello");
+        let content: ContentMatchType = serde_json::from_value(json_str).unwrap();
+        assert!(matches!(content, ContentMatchType::String(_)));
+
+        // Test Element
+        let json_el = json!({
+            "tag": "span",
+            "content": "inner"
+        });
+        let content: ContentMatchType = serde_json::from_value(json_el).unwrap();
+        if let ContentMatchType::Element(el) = content {
+            if let Element::Styled(s) = *el {
+                assert_eq!(s.tag, HtmlTag::Span);
+            } else {
+                panic!("Expected Styled element");
+            }
+        } else {
+            panic!("Expected Element variant");
+        }
+
+        // Test Content (Array)
+        let json_arr = json!(["item1", {"tag": "br"}]);
+        let content: ContentMatchType = serde_json::from_value(json_arr).unwrap();
+        if let ContentMatchType::Content(vec) = content {
+            assert_eq!(vec.len(), 2);
+        } else {
+            panic!("Expected Content variant");
+        }
+    }
+
+    #[test]
+    fn test_content_match_type_nested_structured_content() {
+        // This is what the user wants to support
+        let json_nested = json!({
+            "type": "structured-content",
+            "content": "nested string"
+        });
+        
+        // This should now succeed with the manual implementation
+        let content: ContentMatchType = serde_json::from_value(json_nested).unwrap();
+        if let ContentMatchType::Element(el) = content {
+            if let Element::Styled(s) = *el {
+                assert_eq!(s.tag, HtmlTag::Div);
+                if let Some(ContentMatchType::String(inner)) = &s.content {
+                    assert_eq!(inner, "nested string");
+                } else {
+                    panic!("Expected inner content to be String");
+                }
+            } else {
+                panic!("Expected Styled element (Div)");
+            }
+        } else {
+            panic!("Expected Element variant");
+        }
     }
 }

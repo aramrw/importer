@@ -83,6 +83,8 @@ pub use dictionary_importer::import_dictionary;
 
 #[cfg(test)]
 mod importer_tests {
+    use std::fs::read_dir;
+
     use crate::{
         dictionary_database::DatabaseDictionaryData, dictionary_importer::import_dictionary,
     };
@@ -93,9 +95,12 @@ mod importer_tests {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
             .init();
-        let path = std::path::Path::new("./dictionaries/kotobankesjp");
+
+        let mut buf = String::new();
+
+        let path = std::path::Path::new("./dictionaries/kotobankes-es-es");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
-        std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
+        // std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
     }
 
     #[ignore]
