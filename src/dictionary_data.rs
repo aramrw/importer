@@ -1,8 +1,10 @@
 //! Contains the data structures for the Yomichan dictionary format.
 
 use indexmap::IndexMap;
-
+use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
+use std::fmt;
 use std::string::String;
 
 use crate::dictionary_database::TermMetaPhoneticData;
@@ -246,43 +248,95 @@ impl<'de> Deserialize<'de> for MetaDataMatchType {
     where
         D: Deserializer<'de>,
     {
-        serde_untagged::UntaggedEnumVisitor::new()
-            .string(|str| {
+        struct MetaDataVisitor;
+
+        impl<'de> Visitor<'de> for MetaDataVisitor {
+            type Value = MetaDataMatchType;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a term meta data (string, integer, or map)")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
                 Ok(MetaDataMatchType::Frequency(
-                    TermMetaFreqDataMatchType::Generic(GenericFreqData::String(str.to_string())),
+                    TermMetaFreqDataMatchType::Generic(GenericFreqData::String(v.to_string())),
                 ))
-            })
-            .i128(|int| {
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
                 Ok(MetaDataMatchType::Frequency(
-                    TermMetaFreqDataMatchType::Generic(GenericFreqData::Integer(int)),
+                    TermMetaFreqDataMatchType::Generic(GenericFreqData::Integer(v as i128)),
                 ))
-            })
-            .map(|map| {
-                let value = map.deserialize::<serde_json::Value>()?;
-                #[allow(clippy::if_same_then_else)]
-                if value.get("frequency").is_some() {
-                    serde_json::from_value(value)
-                        .map(MetaDataMatchType::Frequency)
-                        .map_err(serde::de::Error::custom)
-                } else if value.get("value").is_some() {
-                    serde_json::from_value(value)
-                        .map(MetaDataMatchType::Frequency)
-                        .map_err(serde::de::Error::custom)
-                } else if value.get("pitches").is_some() {
-                    serde_json::from_value(value)
-                        .map(MetaDataMatchType::Pitch)
-                        .map_err(serde::de::Error::custom)
-                } else if value.get("transcriptions").is_some() {
-                    serde_json::from_value(value)
-                        .map(MetaDataMatchType::Phonetic)
-                        .map_err(serde::de::Error::custom)
-                } else {
-                    Err(serde::de::Error::custom(format!(
-                        "[yomichan-rs] Unknown term meta data type: {value:?}"
-                    )))
+            }
+
+            fn visit_i128<E>(self, v: i128) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(MetaDataMatchType::Frequency(
+                    TermMetaFreqDataMatchType::Generic(GenericFreqData::Integer(v)),
+                ))
+            }
+
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(MetaDataMatchType::Frequency(
+                    TermMetaFreqDataMatchType::Generic(GenericFreqData::Integer(v as i128)),
+                ))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut buffered = serde_json::Map::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "frequency" | "value" => {
+                            buffered.insert(key, map.next_value()?);
+                            while let Some((k, v)) = map.next_entry::<String, Value>()? {
+                                buffered.insert(k, v);
+                            }
+                            return serde_json::from_value(Value::Object(buffered))
+                                .map(MetaDataMatchType::Frequency)
+                                .map_err(de::Error::custom);
+                        }
+                        "pitches" => {
+                            buffered.insert(key, map.next_value()?);
+                            while let Some((k, v)) = map.next_entry::<String, Value>()? {
+                                buffered.insert(k, v);
+                            }
+                            return serde_json::from_value(Value::Object(buffered))
+                                .map(MetaDataMatchType::Pitch)
+                                .map_err(de::Error::custom);
+                        }
+                        "transcriptions" => {
+                            buffered.insert(key, map.next_value()?);
+                            while let Some((k, v)) = map.next_entry::<String, Value>()? {
+                                buffered.insert(k, v);
+                            }
+                            return serde_json::from_value(Value::Object(buffered))
+                                .map(MetaDataMatchType::Phonetic)
+                                .map_err(de::Error::custom);
+                        }
+                        _ => {
+                            buffered.insert(key, map.next_value()?);
+                        }
+                    }
                 }
-            })
-            .deserialize(deserializer)
+                Err(de::Error::custom("Unknown term meta data type"))
+            }
+        }
+
+        deserializer.deserialize_any(MetaDataVisitor)
     }
 }
 
