@@ -595,7 +595,7 @@ fn convert_kanji_bank(
             outpath: outpath.clone(),
             reason: reason.to_string(),
         })?;
-        let reader = BufReader::new(file);
+        let reader = BufReader::with_capacity(128 * 1024, file);
 
         let mut stream = JsonDeserializer::from_reader(reader).into_iter::<KanjiBank>();
         match stream.next() {
@@ -653,7 +653,7 @@ fn convert_term_bank_file(
             outpath: outpath.clone(),
             reason: reason.to_string(),
         })?;
-        let reader = BufReader::new(file);
+        let reader = BufReader::with_capacity(128 * 1024, file);
 
         let mut stream = JsonDeserializer::from_reader(reader).into_iter::<Vec<TermEntryItem>>();
         match stream.next() {

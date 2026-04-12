@@ -98,7 +98,7 @@ mod importer_tests {
 
         let mut buf = String::new();
 
-        let path = std::path::Path::new("./dictionaries/kotobankes-es-es");
+        let path = std::path::Path::new("./dictionaries/wty-es-es");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
         // std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
     }
@@ -116,7 +116,7 @@ mod importer_tests {
         tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
             .init();
-        let path = std::path::Path::new("./dictionaries/kotobankesjp");
+        let path = std::path::Path::new("./dictionaries/wty-es-es");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
         //std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
 
