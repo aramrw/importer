@@ -92,9 +92,9 @@ mod importer_tests {
 
     #[test]
     fn dict() {
-        tracing_subscriber::fmt()
+        let _ = tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
-            .init();
+            .try_init();
 
         let mut buf = String::new();
 
@@ -113,9 +113,9 @@ mod importer_tests {
             .build()
             .unwrap();
 
-        tracing_subscriber::fmt()
+        let _ = tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
-            .init();
+            .try_init();
         let path = std::path::Path::new("./dictionaries/wty-es-es");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
         //std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
