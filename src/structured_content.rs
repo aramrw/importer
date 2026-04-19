@@ -1,13 +1,11 @@
 //! Contains the data structures for the structured content of the dictionary entries.
 
-use std::{fmt, hash::Hash, marker::PhantomData};
 use compact_str::{CompactString, ToCompactString};
+use std::{fmt, hash::Hash, marker::PhantomData};
 
 use indexmap::IndexMap;
 use serde::{
-    Deserialize,
-    Deserializer,
-    Serialize,
+    Deserialize, Deserializer, Serialize,
     de::{self, MapAccess, SeqAccess, Visitor},
 };
 use serde_json::Value;
@@ -224,7 +222,9 @@ impl<'de> Deserialize<'de> for ContentMatchType {
                         },
                     ))))
                 } else {
-                    Err(de::Error::custom("Unknown map structure for ContentMatchType"))
+                    Err(de::Error::custom(
+                        "Unknown map structure for ContentMatchType",
+                    ))
                 }
             }
         }
@@ -272,7 +272,7 @@ impl From<TermGlossary> for TermGlossaryGroupType {
     fn from(value: TermGlossary) -> Self {
         match value {
             TermGlossary::Deinflection(d) => Self::Deinflection(d),
-            TermGlossary::Content(ref c) => {
+            TermGlossary::Content(_) => {
                 let plain_text = match value {
                     TermGlossary::Content(ref c) => c.to_plain_text(),
                     _ => unreachable!(),
@@ -320,7 +320,10 @@ impl TermGlossaryContent {
                 if let Some(alt) = &image_element.alt {
                     buffer.push_str(alt);
                 } else {
-                    buffer.push_str(&CompactString::from(format!("[Image: {}]", image_element.path)));
+                    buffer.push_str(&CompactString::from(format!(
+                        "[Image: {}]",
+                        image_element.path
+                    )));
                 }
             }
             // This is the crucial part that contains the recursive tree.
@@ -879,11 +882,9 @@ impl<'de> Visitor<'de> for ElementVisitor {
             "a" => Ok(Element::Link(de::Deserialize::deserialize(
                 de::value::SeqAccessDeserializer::new(seq),
             )?)),
-            "div" | "span" | "ol" | "ul" | "li" | "details" | "summary" => {
-                Ok(Element::Styled(de::Deserialize::deserialize(
-                    de::value::SeqAccessDeserializer::new(seq),
-                )?))
-            }
+            "div" | "span" | "ol" | "ul" | "li" | "details" | "summary" => Ok(Element::Styled(
+                de::Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))?,
+            )),
             "ruby" | "rt" | "rp" | "t" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "tb"
             | "tf" => Ok(Element::Unstyled(de::Deserialize::deserialize(
                 de::value::SeqAccessDeserializer::new(seq),
@@ -967,9 +968,9 @@ impl Element {
             | HtmlTag::TableGeneric => Ok(Element::Unstyled(
                 UnstyledElement::deserialize_from_map(tag, map)?,
             )),
-            HtmlTag::TableData | HtmlTag::TableHeader => {
-                Ok(Element::Table(TableElement::deserialize_from_map(tag, map)?))
-            }
+            HtmlTag::TableData | HtmlTag::TableHeader => Ok(Element::Table(
+                TableElement::deserialize_from_map(tag, map)?,
+            )),
             HtmlTag::Break => Ok(Element::LineBreak(LineBreak::deserialize_from_map(
                 tag, map,
             )?)),
@@ -1132,7 +1133,7 @@ impl<'de> Deserialize<'de> for TableElement {
             {
                 // Field 1: Tag (required, always first)
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 // Now, we handle the rest of the fields which might be optional or in any order.
@@ -1158,13 +1159,18 @@ impl<'de> Deserialize<'de> for TableElement {
 
                     if value.is_object() {
                         // Try to see if it's a style object
-                        if let Ok(s) = serde_json::from_value::<StructuredContentStyle>(value.clone()) {
+                        if let Ok(s) =
+                            serde_json::from_value::<StructuredContentStyle>(value.clone())
+                        {
                             style = Some(s);
                             continue;
                         }
 
                         // Try to see if it's a data object
-                        if let Ok(d) = serde_json::from_value::<IndexMap<CompactString, CompactString>>(value.clone()) {
+                        if let Ok(d) = serde_json::from_value::<
+                            IndexMap<CompactString, CompactString>,
+                        >(value.clone())
+                        {
                             data = Some(d);
                             continue;
                         }
@@ -1210,7 +1216,9 @@ impl<'de> Deserialize<'de> for TableElement {
                 Ok(TableElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     col_span: helper.col_span,
                     row_span: helper.row_span,
                     style: helper.style,
@@ -1287,7 +1295,7 @@ where
 
         // Tag is always first and required.
         let tag: String = seq
-            .next_element()? 
+            .next_element()?
             .ok_or_else(|| de::Error::invalid_length(0, &"tag"))?;
         map.insert("tag".to_string(), Value::String(tag));
 
@@ -1459,18 +1467,18 @@ impl LinkElement {
         mut fields: IndexMap<CompactString, Value>,
     ) -> Result<Self, String> {
         let content = fields
-            .remove("content")
+            .swap_remove("content")
             .map(serde_json::from_value::<ContentMatchType>)
             .transpose()
             .map_err(|e| e.to_string())?;
         let href = fields
-            .remove("href")
+            .swap_remove("href")
             .map(serde_json::from_value::<CompactString>)
             .transpose()
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "missing field href".to_string())?;
         let lang = fields
-            .remove("lang")
+            .swap_remove("lang")
             .map(serde_json::from_value::<CompactString>)
             .transpose()
             .map_err(|e| e.to_string())?;
@@ -1533,32 +1541,32 @@ impl StyledElement {
         mut fields: IndexMap<CompactString, Value>,
     ) -> Result<Self, String> {
         let content = fields
-            .remove("content")
+            .swap_remove("content")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let data = fields
-            .remove("data")
+            .swap_remove("data")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let style = fields
-            .remove("style")
+            .swap_remove("style")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let title = fields
-            .remove("title")
+            .swap_remove("title")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let open = fields
-            .remove("open")
+            .swap_remove("open")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let lang = fields
-            .remove("lang")
+            .swap_remove("lang")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
@@ -1615,17 +1623,17 @@ impl UnstyledElement {
         mut fields: IndexMap<CompactString, Value>,
     ) -> Result<Self, String> {
         let content = fields
-            .remove("content")
+            .swap_remove("content")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let data = fields
-            .remove("data")
+            .swap_remove("data")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let lang = fields
-            .remove("lang")
+            .swap_remove("lang")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
@@ -1688,32 +1696,32 @@ impl TableElement {
         mut fields: IndexMap<CompactString, Value>,
     ) -> Result<Self, String> {
         let content = fields
-            .remove("content")
+            .swap_remove("content")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let data = fields
-            .remove("data")
+            .swap_remove("data")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let col_span = fields
-            .remove("colSpan")
+            .swap_remove("colSpan")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let row_span = fields
-            .remove("rowSpan")
+            .swap_remove("rowSpan")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let style = fields
-            .remove("style")
+            .swap_remove("style")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let lang = fields
-            .remove("lang")
+            .swap_remove("lang")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
@@ -1761,7 +1769,7 @@ impl LineBreak {
         mut fields: IndexMap<CompactString, Value>,
     ) -> Result<Self, String> {
         let data = fields
-            .remove("data")
+            .swap_remove("data")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
@@ -1859,93 +1867,93 @@ impl ImageElement {
         mut fields: IndexMap<CompactString, Value>,
     ) -> Result<Self, String> {
         let path = fields
-            .remove("path")
+            .swap_remove("path")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "missing field path".to_string())?;
         let width = fields
-            .remove("width")
+            .swap_remove("width")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let height = fields
-            .remove("height")
+            .swap_remove("height")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let title = fields
-            .remove("title")
+            .swap_remove("title")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let alt = fields
-            .remove("alt")
+            .swap_remove("alt")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let description = fields
-            .remove("description")
+            .swap_remove("description")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let pixelated = fields
-            .remove("pixelated")
+            .swap_remove("pixelated")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let image_rendering = fields
-            .remove("imageRendering")
+            .swap_remove("imageRendering")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let appearance = fields
-            .remove("appearance")
+            .swap_remove("appearance")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let background = fields
-            .remove("background")
+            .swap_remove("background")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let collapsed = fields
-            .remove("collapsed")
+            .swap_remove("collapsed")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let collapsible = fields
-            .remove("collapsible")
+            .swap_remove("collapsible")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let data = fields
-            .remove("data")
+            .swap_remove("data")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let content = fields
-            .remove("content")
+            .swap_remove("content")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let vertical_align = fields
-            .remove("verticalAlign")
+            .swap_remove("verticalAlign")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let border = fields
-            .remove("border")
+            .swap_remove("border")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let border_radius = fields
-            .remove("borderRadius")
+            .swap_remove("borderRadius")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
         let size_units = fields
-            .remove("sizeUnits")
+            .swap_remove("sizeUnits")
             .map(serde_json::from_value)
             .transpose()
             .map_err(|e| e.to_string())?;
@@ -2031,7 +2039,9 @@ impl<'de> Deserialize<'de> for StyledElement {
                 Ok(StyledElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     style: helper.style,
                     title: helper.title.map(Into::into),
                     open: helper.open,
@@ -2045,7 +2055,7 @@ impl<'de> Deserialize<'de> for StyledElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
@@ -2067,7 +2077,10 @@ impl<'de> Deserialize<'de> for StyledElement {
 
                     if value.is_object() {
                         // Is it a map? -> `data`
-                        if let Ok(d) = serde_json::from_value::<IndexMap<CompactString, CompactString>>(value.clone()) {
+                        if let Ok(d) = serde_json::from_value::<
+                            IndexMap<CompactString, CompactString>,
+                        >(value.clone())
+                        {
                             if data.is_none() {
                                 data = Some(d);
                             }
@@ -2177,7 +2190,9 @@ impl<'de> Deserialize<'de> for UnstyledElement {
                 Ok(UnstyledElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     lang: helper.lang.map(Into::into),
                 })
             }
@@ -2187,7 +2202,7 @@ impl<'de> Deserialize<'de> for UnstyledElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
@@ -2195,7 +2210,10 @@ impl<'de> Deserialize<'de> for UnstyledElement {
 
                 while let Some(value) = seq.next_element::<Value>()? {
                     if value.is_object() {
-                        if let Ok(d) = serde_json::from_value::<IndexMap<CompactString, CompactString>>(value.clone()) {
+                        if let Ok(d) = serde_json::from_value::<
+                            IndexMap<CompactString, CompactString>,
+                        >(value.clone())
+                        {
                             if data.is_none() {
                                 data = Some(d);
                             }
@@ -2262,7 +2280,7 @@ impl<'de> Deserialize<'de> for LinkElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
@@ -2352,7 +2370,9 @@ impl<'de> Deserialize<'de> for ImageElement {
                     border: helper.border.map(Into::into),
                     border_radius: helper.border_radius.map(Into::into),
                     size_units: helper.size_units,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     path: helper.path.into(),
                     width: helper.width,
                     height: helper.height,
@@ -2378,13 +2398,13 @@ impl<'de> Deserialize<'de> for ImageElement {
                 // Based on the log, the sequence appears to be:
                 // [tag, size_units, path, width, height, alt, appearance, pixelated, collapsed, collapsible]
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 // The rest of the fields have a fixed order in this compact format.
                 let size_units: Option<SizeUnits> = seq.next_element()?.unwrap_or(None);
                 let path: CompactString = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(2, &self))?;
                 let width: Option<f32> = seq.next_element()?.unwrap_or(None);
                 let height: Option<f32> = seq.next_element()?.unwrap_or(None);
@@ -2453,7 +2473,9 @@ impl<'de> Deserialize<'de> for LineBreak {
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
                 Ok(LineBreak {
                     tag: helper.tag,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                 })
             }
 
@@ -2462,9 +2484,10 @@ impl<'de> Deserialize<'de> for LineBreak {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let data: Option<IndexMap<CompactString, CompactString>> = seq.next_element()?.unwrap_or(None);
+                let data: Option<IndexMap<CompactString, CompactString>> =
+                    seq.next_element()?.unwrap_or(None);
 
                 Ok(LineBreak { tag, data })
             }
@@ -2519,7 +2542,7 @@ mod tests {
             "type": "structured-content",
             "content": "nested string"
         });
-        
+
         // This should now succeed with the manual implementation
         let content: ContentMatchType = serde_json::from_value(json_nested).unwrap();
         if let ContentMatchType::Element(el) = content {

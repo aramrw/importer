@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(feature = "simd"))]
 use serde_json::Deserializer as JsonDeserializer;
 use std::fmt::Debug;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 use tempfile::tempdir;
@@ -25,8 +24,8 @@ use uuid::Uuid;
 #[cfg(feature = "trace")]
 use tracing::debug;
 
-#[cfg(feature = "simd")]
-use memchr::memmem;
+// #[cfg(feature = "simd")]
+// use memchr::memmem;
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 

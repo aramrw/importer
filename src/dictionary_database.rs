@@ -7,13 +7,12 @@ use crate::dictionary_importer::DictionarySummary;
 use crate::errors::DictionaryFileError;
 use crate::structured_content::TermGlossaryGroupType;
 use indexmap::IndexMap;
+use serde_with::NoneAsEmptyString;
 use serde_with::serde_as;
 use serde_with::skip_serializing_none;
-use serde_with::NoneAsEmptyString;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::BufReader;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -416,7 +415,7 @@ impl DatabaseMetaMatchType {
                 let id = Uuid::now_v7().to_string();
                 let TermMeta {
                     expression,
-                    mode,
+                    mode: _mode,
                     data,
                 } = entry;
 
@@ -751,7 +750,7 @@ macro_rules! collect_variant_data_ref {
                 match item_ref {
                     // `ref mut data` borrows the data mutably from within the enum variant
                     $enum_type::$variant(ref data) => Some(data), // data is &mut InnerDataType
-                    _ => None,                                   // Ignore other variants
+                    _ => None,                                    // Ignore other variants
                 }
             })
             .collect::<Vec<_>>() // Collects into Vec<&mut InnerDataType>

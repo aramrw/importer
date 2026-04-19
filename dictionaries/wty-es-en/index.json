@@ -1,0 +1,15 @@
+{
+  "title": "wty-es-en",
+  "format": 3,
+  "revision": "2026.04.09",
+  "sequenced": true,
+  "author": "wty contributors",
+  "url": "https://github.com/yomidevs/wiktionary-to-yomitan",
+  "description": "Dictionaries for various language pairs generated from Wiktionary data, via Kaikki and wty.",
+  "attribution": "https://kaikki.org/",
+  "sourceLanguage": "es",
+  "targetLanguage": "en",
+  "isUpdatable": true,
+  "indexUrl": "https://huggingface.co/datasets/daxida/wty-release/resolve/main/latest/index/wty-es-en-index.json?download=true",
+  "downloadUrl": "https://huggingface.co/datasets/daxida/wty-release/resolve/main/latest/dict/es/en/wty-es-en.zip?download=true"
+}

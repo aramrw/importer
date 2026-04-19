@@ -13,25 +13,25 @@ use crate::errors::{DictionaryFileError, ImportError};
 use crate::structured_content::ImageElement;
 use crate::utils::_convert_string_to_number;
 
-trait StrMacro {
-    fn from_static_str(s: &'static ::core::primitive::str) -> Self;
-}
-impl StrMacro for &::core::primitive::str {
-    fn from_static_str(s: &'static ::core::primitive::str) -> Self {
-        s
-    }
-}
-impl StrMacro for ::std::string::String {
-    fn from_static_str(s: &'static ::core::primitive::str) -> Self {
-        ::std::borrow::ToOwned::to_owned(s)
-    }
-}
-macro_rules! str {
-    ($s:literal) => {
-        StrMacro::from_static_str($s)
-    };
-}
-
+// trait StrMacro {
+//     fn from_static_str(s: &'static ::core::primitive::str) -> Self;
+// }
+// impl StrMacro for &::core::primitive::str {
+//     fn from_static_str(s: &'static ::core::primitive::str) -> Self {
+//         s
+//     }
+// }
+// impl StrMacro for ::std::string::String {
+//     fn from_static_str(s: &'static ::core::primitive::str) -> Self {
+//         ::std::borrow::ToOwned::to_owned(s)
+//     }
+// }
+// macro_rules! str {
+//     ($s:literal) => {
+//         StrMacro::from_static_str($s)
+//     };
+// }
+//
 // #[rustfmt::skip]
 // pub static KANA_MAP: LazyLock<BiHashMap<&'static str, &'static str>> = LazyLock::new(|| {
 //     BiHashMap::from_iter([
