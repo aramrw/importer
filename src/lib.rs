@@ -90,32 +90,34 @@ mod importer_tests {
 
     #[test]
     fn dict() {
-        tracing_subscriber::fmt()
+        let _ = tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
-            .init();
-        let path = std::path::Path::new("./dictionaries/kotobankesjp");
+            .try_init();
+
+        let path = std::path::Path::new("./dictionaries/wty-es-en");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
-        std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
+        //let mut buf = String::new();
+        // std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
     }
 
     #[ignore]
     #[test]
     fn with_pprof() {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let guard = pprof::ProfilerGuardBuilder::default()
             .frequency(1000)
             .blocklist(&["libc", "libgcc", "pthread", "vdso"])
             .build()
             .unwrap();
 
-        tracing_subscriber::fmt()
+        let _ = tracing_subscriber::fmt()
             .with_max_level(tracing::Level::DEBUG)
-            .init();
-        let path = std::path::Path::new("./dictionaries/jitendex-yomitan");
+            .try_init();
+        let path = std::path::Path::new("./dictionaries/wty-es-es");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
-        std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
+        //std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Ok(report) = guard.report().build() {
             let file = std::fs::File::create("flamegraph.svg").unwrap();
             report.flamegraph(file).unwrap();

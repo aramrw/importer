@@ -1,0 +1,1000 @@
+[
+  [
+    "anovelado",
+    "",
+    "adj",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[形] 小説の，小説的な，小説的特徴を備えた．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anovulacion",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[女] 無排卵．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anovulación",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[女] 無排卵．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anovulatoria",
+    "",
+    "adj",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[形] 無排卵（性）の；排卵停止の，排卵を抑制する．"
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "━[男] 排卵抑制剤．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anovulatorio",
+    "",
+    "adj",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[形] 無排卵（性）の；排卵停止の，排卵を抑制する．"
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "━[男] 排卵抑制剤．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anoxia",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[女] 〖医〗 酸素欠乏症，無酸素症．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anqueta",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[女] 〘古語〙",
+                      {
+                        "tag": "details",
+                        "content": [
+                          {
+                            "tag": "summary",
+                            "content": "1 example",
+                            "data": {
+                              "content": "summary-entry"
+                            }
+                          },
+                          {
+                            "tag": "div",
+                            "content": [
+                              {
+                                "tag": "div",
+                                "content": [
+                                  {
+                                    "tag": "div",
+                                    "content": "estar de media anqueta",
+                                    "data": {
+                                      "content": "example-sentence-a"
+                                    }
+                                  },
+                                  {
+                                    "tag": "div",
+                                    "content": "〘話〙 浅く腰掛けている．",
+                                    "data": {
+                                      "content": "example-sentence-b"
+                                    }
+                                  }
+                                ],
+                                "data": {
+                                  "content": "example-sentence"
+                                }
+                              }
+                            ],
+                            "data": {
+                              "content": "extra-info"
+                            }
+                          }
+                        ],
+                        "data": {
+                          "content": "details-entry-examples"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anquilosamiento",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[男]"
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      {
+                        "tag": "span",
+                        "content": "1",
+                        "style": {
+                          "fontWeight": "bold"
+                        }
+                      },
+                      "〖医〗 （関節の）強直．"
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      {
+                        "tag": "span",
+                        "content": "2",
+                        "style": {
+                          "fontWeight": "bold"
+                        }
+                      },
+                      "鈍化，硬直化．",
+                      {
+                        "tag": "details",
+                        "content": [
+                          {
+                            "tag": "summary",
+                            "content": "1 example",
+                            "data": {
+                              "content": "summary-entry"
+                            }
+                          },
+                          {
+                            "tag": "div",
+                            "content": [
+                              {
+                                "tag": "div",
+                                "content": [
+                                  {
+                                    "tag": "div",
+                                    "content": "el anquilosamiento de la economía",
+                                    "data": {
+                                      "content": "example-sentence-a"
+                                    }
+                                  },
+                                  {
+                                    "tag": "div",
+                                    "content": "経済の停滞状態．",
+                                    "data": {
+                                      "content": "example-sentence-b"
+                                    }
+                                  }
+                                ],
+                                "data": {
+                                  "content": "example-sentence"
+                                }
+                              }
+                            ],
+                            "data": {
+                              "content": "extra-info"
+                            }
+                          }
+                        ],
+                        "data": {
+                          "content": "details-entry-examples"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anquilosar",
+    "",
+    "",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[他] 〈関節を〉強直させる．"
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "━",
+                      {
+                        "tag": "span",
+                        "content": "～・se",
+                        "style": {
+                          "fontWeight": "bold"
+                        }
+                      },
+                      "[再]",
+                      {
+                        "tag": "div",
+                        "content": [
+                          {
+                            "tag": "div",
+                            "content": "Se va anquilosando la economía.",
+                            "data": {
+                              "content": "example-sentence-a"
+                            }
+                          },
+                          {
+                            "tag": "div",
+                            "content": "経済は鈍化しつつある．",
+                            "data": {
+                              "content": "example-sentence-b"
+                            }
+                          }
+                        ],
+                        "data": {
+                          "content": "example-sentence"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anquilosaurio",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[男] 〖古生〗 アンキロサウルス．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anquilosis",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[女] 〘単複同形〙 〖医〗 （関節の）強直（症）．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anquilostoma",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[男] 〖動〗 鉤虫(こうちゅう)，十二指腸虫．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anquilostomiasis",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[女] 〘単複同形〙 〖医〗 鉤虫(こうちゅう)症，十二指腸虫症．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "ansa",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[女] →",
+                      "hansa",
+                      "."
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "ansar",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[男] 〖鳥〗 ガチョウ；ガン．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "ánsar",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[男] 〖鳥〗 ガチョウ；ガン．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "ansarina",
+    "",
+    "adj",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[形] ガチョウの；ガンの．"
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "━[男] ガチョウ［ガン］のひな．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "ansarino",
+    "",
+    "adj",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[形] ガチョウの；ガンの．"
+                    ]
+                  }
+                ]
+              },
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "━[男] ガチョウ［ガン］のひな．"
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "ansaron",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[男] →",
+                      "ansarino",
+                      "."
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "ansarón",
+    "",
+    "n",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[男] →",
+                      "ansarino",
+                      "."
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anseatica",
+    "",
+    "adj",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[形] →",
+                      "hanseático",
+                      "."
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anseatico",
+    "",
+    "adj",
+    "",
+    0,
+    [
+      {
+        "type": "structured-content",
+        "content": [
+          {
+            "tag": "ol",
+            "content": [
+              {
+                "tag": "li",
+                "content": [
+                  {
+                    "tag": "div",
+                    "content": [
+                      "[形] →",
+                      "hanseático",
+                      "."
+                    ]
+                  }
+                ]
+              }
+            ],
+            "data": {
+              "content": "glosses"
+            }
+          }
+        ]
+      }
+    ],
+    0,
+    ""
+  ],
+  [
+    "anseática",
+    "",
+    "adj",
+    "",
+    0,
+    [
+      {

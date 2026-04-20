@@ -1,13 +1,11 @@
 //! Contains the data structures for the structured content of the dictionary entries.
 
-use std::{fmt, hash::Hash, marker::PhantomData};
 use compact_str::{CompactString, ToCompactString};
+use std::{fmt, hash::Hash, marker::PhantomData};
 
 use indexmap::IndexMap;
 use serde::{
-    Deserialize,
-    Deserializer,
-    Serialize,
+    Deserialize, Deserializer, Serialize,
     de::{self, MapAccess, SeqAccess, Visitor},
 };
 use serde_json::Value;
@@ -32,8 +30,9 @@ pub struct StructuredContent {
 
 /// A match type to deserialize any `Content` type.
 #[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(untagged)]
 pub enum ContentMatchType {
+    /// A string.
+    String(CompactString),
     /// A single html element.
     /// See: [`HtmlTag`].
     ///
@@ -44,8 +43,6 @@ pub enum ContentMatchType {
     /// See: [`HtmlTag`].
     ///
     Content(Vec<ContentMatchType>),
-    /// A string.
-    String(CompactString),
 }
 
 impl<'de> Deserialize<'de> for ContentMatchType {
@@ -53,46 +50,186 @@ impl<'de> Deserialize<'de> for ContentMatchType {
     where
         D: Deserializer<'de>,
     {
-        // Step 1: Deserialize into a generic Value.
-        let value = serde_json::Value::deserialize(deserializer).map_err(|e| {
-            de::Error::custom(format!(
-                "Failed to deserialize into intermediate Value: {e}",
-            ))
-        })?;
+        struct ContentMatchTypeVisitor;
 
-        // errors from each attempt
-        let mut errors = Vec::with_capacity(3);
+        impl<'de> Visitor<'de> for ContentMatchTypeVisitor {
+            type Value = ContentMatchType;
 
-        // Try as Element (expects an object or array representing a tag).
-        if value.is_object() || value.is_array() {
-            match Element::deserialize(value.clone()) {
-                Ok(element) => return Ok(ContentMatchType::Element(Box::new(element))),
-                Err(e) => errors.push(format!("[Attempted as Element] {e}")),
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string, an array of content, or a structured content object")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ContentMatchType::String(v.to_compact_string()))
+            }
+
+            fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let vec = Vec::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+                Ok(ContentMatchType::Content(vec))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let mut tag = None;
+                let mut ty = None;
+                let mut content = None;
+                let mut buffered_fields = serde_json::Map::new();
+
+                while let Some(key) = map.next_key::<CompactString>()? {
+                    match key.as_str() {
+                        "tag" => {
+                            let t: HtmlTag = map.next_value()?;
+                            if buffered_fields.is_empty() {
+                                // Fast path: nothing buffered yet
+                                return Ok(ContentMatchType::Element(Box::new(
+                                    Element::deserialize_from_map(t, map)?,
+                                )));
+                            }
+                            tag = Some(t);
+                        }
+                        "type" => {
+                            let t: CompactString = map.next_value()?;
+                            if t == "structured-content" && buffered_fields.is_empty() {
+                                // Fast path for structured-content
+                                while let Some(k) = map.next_key::<CompactString>()? {
+                                    if k == "content" {
+                                        content = Some(map.next_value()?);
+                                    } else {
+                                        let _: de::IgnoredAny = map.next_value()?;
+                                    }
+                                }
+                                let content =
+                                    content.ok_or_else(|| de::Error::missing_field("content"))?;
+
+                                return Ok(ContentMatchType::Element(Box::new(Element::Styled(
+                                    StyledElement {
+                                        tag: HtmlTag::Div,
+                                        content: Some(content),
+                                        data: None,
+                                        style: None,
+                                        title: None,
+                                        open: None,
+                                        lang: None,
+                                    },
+                                ))));
+                            }
+                            ty = Some(t);
+                        }
+                        "content" => {
+                            content = Some(map.next_value()?);
+                        }
+                        _ => {
+                            buffered_fields.insert(key.to_string(), map.next_value()?);
+                        }
+                    }
+                    if tag.is_some() || ty.is_some() {
+                        break;
+                    }
+                }
+
+                // If we are here, we either found tag/type late, or we finished the map.
+                // Continue consuming if not finished.
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "tag" => tag = tag.or(Some(map.next_value()?)),
+                        "type" => ty = ty.or(Some(map.next_value()?)),
+                        "content" => content = content.or(Some(map.next_value()?)),
+                        _ => {
+                            buffered_fields.insert(key, map.next_value()?);
+                        }
+                    }
+                }
+
+                // Handle what we found
+                if let Some(t) = tag {
+                    let mut fields = buffered_fields;
+                    if let Some(c) = content {
+                        fields.insert(
+                            "content".to_string(),
+                            serde_json::to_value(c).map_err(de::Error::custom)?,
+                        );
+                    }
+                    if let Some(t_val) = ty {
+                        fields.insert("type".to_string(), Value::String(t_val.to_string()));
+                    }
+                    let value = Value::Object(fields);
+                    let tag_str: String = serde_json::to_value(t)
+                        .map_err(de::Error::custom)?
+                        .as_str()
+                        .unwrap()
+                        .to_string();
+
+                    let element = match t {
+                        HtmlTag::Anchor => Element::Link(
+                            LinkElement::deserialize_with_tag(tag_str, value)
+                                .map_err(de::Error::custom)?,
+                        ),
+                        HtmlTag::Div
+                        | HtmlTag::Span
+                        | HtmlTag::OrderedList
+                        | HtmlTag::UnorderedList
+                        | HtmlTag::ListItem
+                        | HtmlTag::Details
+                        | HtmlTag::Summary => Element::Styled(
+                            StyledElement::deserialize_with_tag(tag_str, value)
+                                .map_err(de::Error::custom)?,
+                        ),
+                        HtmlTag::Ruby
+                        | HtmlTag::RubyText
+                        | HtmlTag::RubyParenthesis
+                        | HtmlTag::Table
+                        | HtmlTag::Thead
+                        | HtmlTag::TableFooter
+                        | HtmlTag::TableBody
+                        | HtmlTag::TableRow
+                        | HtmlTag::TableGeneric => Element::Unstyled(
+                            UnstyledElement::deserialize_with_tag(tag_str, value)
+                                .map_err(de::Error::custom)?,
+                        ),
+                        HtmlTag::TableData | HtmlTag::TableHeader => Element::Table(
+                            TableElement::deserialize_with_tag(tag_str, value)
+                                .map_err(de::Error::custom)?,
+                        ),
+                        HtmlTag::Break => Element::LineBreak(
+                            LineBreak::deserialize_with_tag(tag_str, value)
+                                .map_err(de::Error::custom)?,
+                        ),
+                        HtmlTag::Img => Element::Image(
+                            ImageElement::deserialize_with_tag(tag_str, value)
+                                .map_err(de::Error::custom)?,
+                        ),
+                    };
+                    Ok(ContentMatchType::Element(Box::new(element)))
+                } else if ty.as_deref() == Some("structured-content") {
+                    let content = content.ok_or_else(|| de::Error::missing_field("content"))?;
+                    Ok(ContentMatchType::Element(Box::new(Element::Styled(
+                        StyledElement {
+                            tag: HtmlTag::Div,
+                            content: Some(content),
+                            data: None,
+                            style: None,
+                            title: None,
+                            open: None,
+                            lang: None,
+                        },
+                    ))))
+                } else {
+                    Err(de::Error::custom(
+                        "Unknown map structure for ContentMatchType",
+                    ))
+                }
             }
         }
 
-        // Try as Vec<ContentMatchType> (expects an array).
-        if value.is_array() {
-            match <Vec<ContentMatchType>>::deserialize(value.clone()) {
-                Ok(content_vec) => return Ok(ContentMatchType::Content(content_vec)),
-                Err(e) => errors.push(format!("[Attempted as Vec<ContentMatchType>] {e}")),
-            }
-        }
-
-        // Try as String.
-        if value.is_string() {
-            match String::deserialize(value.clone()) {
-                Ok(s) => return Ok(ContentMatchType::String(s.into())),
-                Err(e) => errors.push(format!("[Attempted as String] {e}")),
-            }
-        }
-
-        // Step 5: If all attempts failed, report everything.
-        Err(de::Error::custom(format!(
-            "Data did not match any variant of ContentMatchType (Element, Vec, or String).\n\nProblematic value: {}\n\nErrors:\n-{}",
-            value,
-            errors.join("\n-")
-        )))
+        deserializer.deserialize_any(ContentMatchTypeVisitor)
     }
 }
 
@@ -103,7 +240,7 @@ impl<'de> Deserialize<'de> for ContentMatchType {
 /// # Fields
 /// * `plain_text: String` - Usable in all programs for simple rendering of definitions
 /// * `html: Option<String>` - Node tree parsed as html
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug, Eq, Hash)]
 pub struct TermGlossaryContentGroup {
     // this is used for programs that cannot render html
     pub plain_text: CompactString,
@@ -121,7 +258,7 @@ pub enum TermGlossaryGroupType {
 }
 
 /// A term glossary entry.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TermGlossary {
     /// A content entry.
@@ -135,7 +272,7 @@ impl From<TermGlossary> for TermGlossaryGroupType {
     fn from(value: TermGlossary) -> Self {
         match value {
             TermGlossary::Deinflection(d) => Self::Deinflection(d),
-            TermGlossary::Content(ref c) => {
+            TermGlossary::Content(_) => {
                 let plain_text = match value {
                     TermGlossary::Content(ref c) => c.to_plain_text(),
                     _ => unreachable!(),
@@ -183,7 +320,10 @@ impl TermGlossaryContent {
                 if let Some(alt) = &image_element.alt {
                     buffer.push_str(alt);
                 } else {
-                    buffer.push_str(&CompactString::from(format!("[Image: {}]", image_element.path)));
+                    buffer.push_str(&CompactString::from(format!(
+                        "[Image: {}]",
+                        image_element.path
+                    )));
                 }
             }
             // This is the crucial part that contains the recursive tree.
@@ -301,97 +441,14 @@ pub struct TermGlossaryDeinflection {
     pub rules: Vec<CompactString>,
 }
 
-impl<'de> Deserialize<'de> for TermGlossary {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Deserialize into a generic Value to inspect it multiple times.
-        let value = serde_json::Value::deserialize(deserializer).map_err(de::Error::custom)?;
-
-        // Attempt to parse as both variants.
-        let deinflection_result = TermGlossaryDeinflection::deserialize(value.clone());
-        let content_result = TermGlossaryContent::deserialize(value.clone());
-
-        match (deinflection_result, content_result) {
-            // Case 1: Parsed as both (the ambiguity we need to solve).
-            (Ok(deinflection), Ok(content)) => {
-                // This is where we apply our tie-breaker rule.
-                // We inspect the raw `value` that caused the ambiguity.
-                // If it's an array and its first element is the specific string "structured-content",
-                // we definitively choose the `Content` variant.
-                if let Some(arr) = value.as_array() {
-                    if let Some(first_elem) = arr.first() {
-                        if first_elem.as_str() == Some("structured-content") {
-                            // This is the binary representation of a StructuredContent enum,
-                            // so we MUST choose the Content path.
-                            return Ok(TermGlossary::Content(content));
-                        }
-                    }
-                }
-
-                // If the tie-breaker rule doesn't apply (e.g., it was some other
-                // ambiguous structure), we have to make a choice. Prioritizing
-                // Content might be a reasonable default if such a case could exist.
-                // a panic might be a better option
-                Ok(TermGlossary::Content(content))
-            }
-
-            (Ok(deinflection), Err(_)) => Ok(TermGlossary::Deinflection(deinflection)),
-            (Err(_), Ok(content)) => Ok(TermGlossary::Content(content)),
-
-            // Case 4: Failed to parse as either.
-            (Err(de), Err(co)) => Err(de::Error::custom(format!(
-                "Data did not match any variant of TermGlossary.\n    Deinflection Error: {de}\n    Content Error: {co}\n    Value: {value:#?}"
-            ))),
-        }
-    }
-}
-
 /// The content of a term glossary.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TermGlossaryContent {
-    /// Tagged content.
-    Tagged(TaggedContent),
     /// A string.
     String(CompactString),
-}
-
-impl<'de> Deserialize<'de> for TermGlossaryContent {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Step 1: Deserialize into a generic Value.
-        let value = serde_json::Value::deserialize(deserializer).map_err(|e| {
-            de::Error::custom(format!(
-                "Failed to deserialize into intermediate Value: {e}"
-            ))
-        })?;
-
-        // Step 2: Try to deserialize as `TaggedContent` (expects a map or a sequence).
-        // We'll capture the error if it fails.
-        let tagged_error = match TaggedContent::deserialize(value.clone()) {
-            Ok(tagged) => return Ok(TermGlossaryContent::Tagged(tagged)),
-            Err(e) => e.to_string(), // Keep the error message
-        };
-
-        // Step 3: Try to deserialize as `String`. This is where your error likely originates.
-        // If `value` is a sequence, this will fail with "invalid type: sequence, expected a string".
-        let string_error = match String::deserialize(value.clone()) {
-            Ok(s) => return Ok(TermGlossaryContent::String(s.into())),
-            Err(e) => e.to_string(), // Keep the error message
-        };
-
-        // Step 4: If both attempts failed, report everything.
-        Err(de::Error::custom(format!(
-            "Data did not match any variant of TermGlossaryContent (Tagged or String).\n\nProblematic value: {}\n\nAttempt 1 (as TaggedContent) failed with: {}\nAttempt 2 (as String) failed with: {}",
-            serde_json::to_string_pretty(&value).unwrap_or_else(|_| format!("{value:?}")),
-            tagged_error,
-            string_error
-        )))
-    }
+    /// Tagged content.
+    Tagged(TaggedContent),
 }
 
 /// Tagged content.
@@ -436,20 +493,20 @@ impl<'de> Deserialize<'de> for TaggedContent {
             {
                 // The first element is the tag string.
                 let tag: String = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &"a [tag, payload] sequence"))?;
 
                 // The second element is the payload, which depends on the tag.
                 let content = match tag.as_str() {
                     "text" => {
                         let text: String = seq
-                            .next_element()? 
+                            .next_element()?
                             .ok_or_else(|| de::Error::invalid_length(1, &"a text payload"))?;
                         TaggedContent::Text { text: text.into() }
                     }
                     "img" => {
                         let image_payload: Box<ImageElement> = seq
-                            .next_element()? 
+                            .next_element()?
                             .ok_or_else(|| de::Error::invalid_length(1, &"an image payload"))?;
                         TaggedContent::Image(image_payload)
                     }
@@ -476,42 +533,43 @@ impl<'de> Deserialize<'de> for TaggedContent {
             }
 
             /// Handles the JSON format: `{"type": "tag", ...}`
-            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
             where
                 A: de::MapAccess<'de>,
             {
-                // To handle an internally tagged enum from a map, the easiest
-                // way is to deserialize into a generic value and then use
-                // from_value, which re-applies Serde's `#[serde(tag = "...")]` logic.
-                let value = 
-                    serde_json::Value::deserialize(de::value::MapAccessDeserializer::new(map))?;
+                let mut tag = None;
+                let mut content = None;
+                let mut text = None;
+                let mut img = None;
 
-                // This helper struct allows us to leverage Serde's derived logic for internally tagged enums.
-                #[derive(Deserialize)]
-                #[serde(tag = "type")]
-                enum Helper {
-                    #[serde(rename = "text")]
-                    Text { text: CompactString },
-                    #[serde(rename = "img")]
-                    Image(Box<ImageElement>),
-                    #[serde(rename = "structured-content")]
-                    StructuredContent {
-                        #[serde(rename = "content")]
-                        content: ContentMatchType,
-                    },
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "type" => tag = Some(map.next_value::<String>()?),
+                        "content" => content = Some(map.next_value()?),
+                        "text" => text = Some(map.next_value()?),
+                        "img" => img = Some(map.next_value()?),
+                        _ => {
+                            let _: de::IgnoredAny = map.next_value()?;
+                        }
+                    }
                 }
 
-                // Deserialize from the intermediate `serde_json::Value`.
-                let helper = Helper::deserialize(value).map_err(de::Error::custom)?;
-
-                // Convert from the helper enum back to our main TaggedContent enum.
-                Ok(match helper {
-                    Helper::Text { text } => TaggedContent::Text { text },
-                    Helper::Image(img) => TaggedContent::Image(img),
-                    Helper::StructuredContent { content } => {
-                        TaggedContent::StructuredContent { content }
-                    }
-                })
+                let tag = tag.ok_or_else(|| de::Error::missing_field("type"))?;
+                match tag.as_str() {
+                    "text" => Ok(TaggedContent::Text {
+                        text: text.ok_or_else(|| de::Error::missing_field("text"))?,
+                    }),
+                    "img" => Ok(TaggedContent::Image(
+                        img.ok_or_else(|| de::Error::missing_field("img"))?,
+                    )),
+                    "structured-content" => Ok(TaggedContent::StructuredContent {
+                        content: content.ok_or_else(|| de::Error::missing_field("content"))?,
+                    }),
+                    _ => Err(de::Error::unknown_variant(
+                        &tag,
+                        &["text", "img", "structured-content"],
+                    )),
+                }
             }
         }
 
@@ -585,21 +643,27 @@ pub enum HtmlTag {
     RubyParenthesis,
     /// A table tag.
     Table,
+    /// A table header group tag.
+    #[serde(rename = "thead")]
+    Thead,
+    /// A table body tag.
+    #[serde(rename = "tb", alias = "tbody")]
+    TableBody,
+    /// A table footer tag.
+    #[serde(rename = "tf", alias = "tfoot")]
+    TableFooter,
+    /// A table row tag.
+    #[serde(rename = "tr")]
+    TableRow,
     /// A table data tag.
     #[serde(rename = "td")]
     TableData,
     /// A table header tag.
     #[serde(rename = "th")]
     TableHeader,
-    /// A table body tag.
-    #[serde(rename = "tb")]
-    TableBody,
-    /// A table footer tag.
-    #[serde(rename = "tf")]
-    TableFooter,
-    /// A table row tag.
-    #[serde(rename = "tr")]
-    TableRow,
+    /// An unknown table-related tag often found in dictionaries.
+    #[serde(rename = "t")]
+    TableGeneric,
     /// An anchor tag.
     #[serde(rename = "a")]
     Anchor,
@@ -638,7 +702,7 @@ pub enum VerticalAlign {
     /// Superscript alignment.
     Super,
     /// Text top alignment.
-    #[serde(rename = "text-bottom")]
+    #[serde(rename = "text-top")]
     TextTop,
     /// Text bottom alignment.
     #[serde(rename = "text-bottom")]
@@ -809,16 +873,40 @@ impl<'de> Visitor<'de> for ElementVisitor {
     where
         A: SeqAccess<'de>,
     {
-        // Here we recreate your logic for the array format.
-        // The idea is to deserialize the entire sequence into a serde_json::Value
-        // ONLY because the rest of your logic depends on it. A more performant
-        // solution would deserialize field-by-field.
-        let value_seq: Vec<Value> = 
-            de::Deserialize::deserialize(de::value::SeqAccessDeserializer::new(&mut seq))?;
-        let value = Value::Array(value_seq);
+        // Read the tag first.
+        let tag: String = seq
+            .next_element()?
+            .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
-        // Now you can call a helper function with your existing logic
-        deserialize_element_from_value(value).map_err(de::Error::custom)
+        match tag.as_str() {
+            "a" => Ok(Element::Link(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            "div" | "span" | "ol" | "ul" | "li" | "details" | "summary" => Ok(Element::Styled(
+                de::Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))?,
+            )),
+            "ruby" | "rt" | "rp" | "t" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "tb"
+            | "tf" => Ok(Element::Unstyled(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            "td" | "th" => Ok(Element::Table(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            "br" => Ok(Element::LineBreak(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            "img" => Ok(Element::Image(de::Deserialize::deserialize(
+                de::value::SeqAccessDeserializer::new(seq),
+            )?)),
+            unknown_tag => {
+                let known_variants = &[
+                    "a", "div", "span", "ol", "ul", "li", "details", "summary", "ruby", "rt", "rp",
+                    "t", "table", "thead", "tbody", "tfoot", "tr", "tb", "tf", "td", "th", "br",
+                    "img",
+                ];
+                Err(de::Error::unknown_variant(unknown_tag, known_variants))
+            }
+        }
     }
 
     // This method will be called by `serde_json` when it sees an object.
@@ -826,68 +914,111 @@ impl<'de> Visitor<'de> for ElementVisitor {
     where
         A: MapAccess<'de>,
     {
-        // Same principle: reconstruct a `serde_json::Value` and use your existing logic.
-        let value_map: serde_json::Map<String, Value> = 
-            de::Deserialize::deserialize(de::value::MapAccessDeserializer::new(&mut map))?;
-        let value = Value::Object(value_map);
-
-        // Call the same helper function
-        deserialize_element_from_value(value).map_err(de::Error::custom)
+        if let Some(key) = map.next_key::<CompactString>()? {
+            if key == "tag" {
+                let tag: HtmlTag = map.next_value()?;
+                return Element::deserialize_from_map(tag, map);
+            }
+            // Not "tag", buffer.
+            let mut buffered = IndexMap::new();
+            buffered.insert(key, map.next_value::<Value>()?);
+            while let Some(k) = map.next_key::<CompactString>()? {
+                if k == "tag" {
+                    let tag: HtmlTag = map.next_value()?;
+                    // Consume the rest of the map into the buffered map.
+                    while let Some(k2) = map.next_key::<CompactString>()? {
+                        buffered.insert(k2, map.next_value()?);
+                    }
+                    return Element::deserialize_from_buffered_map(tag, buffered)
+                        .map_err(de::Error::custom);
+                }
+                buffered.insert(k, map.next_value()?);
+            }
+            return Err(de::Error::missing_field("tag"));
+        }
+        Err(de::Error::missing_field("tag"))
     }
 }
 
-fn deserialize_element_from_value(value: Value) -> Result<Element, String> {
-    // Determine the tag from either the map or array structure.
-    let tag_str = if let Some(obj) = value.as_object() {
-        obj.get("tag")
-            .and_then(Value::as_str)
-            .ok_or("Element map is missing a 'tag' field")?
-    } else if let Some(arr) = value.as_array() {
-        if arr.is_empty() {
-            return Err("Element array cannot be empty".to_string());
+impl Element {
+    /// Deserializes an element from a map that has already had its "tag" field consumed.
+    pub fn deserialize_from_map<'de, A>(tag: HtmlTag, map: A) -> Result<Self, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        match tag {
+            HtmlTag::Anchor => Ok(Element::Link(LinkElement::deserialize_from_map(tag, map)?)),
+            HtmlTag::Div
+            | HtmlTag::Span
+            | HtmlTag::OrderedList
+            | HtmlTag::UnorderedList
+            | HtmlTag::ListItem
+            | HtmlTag::Details
+            | HtmlTag::Summary => Ok(Element::Styled(StyledElement::deserialize_from_map(
+                tag, map,
+            )?)),
+            HtmlTag::Ruby
+            | HtmlTag::RubyText
+            | HtmlTag::RubyParenthesis
+            | HtmlTag::Table
+            | HtmlTag::Thead
+            | HtmlTag::TableFooter
+            | HtmlTag::TableBody
+            | HtmlTag::TableRow
+            | HtmlTag::TableGeneric => Ok(Element::Unstyled(
+                UnstyledElement::deserialize_from_map(tag, map)?,
+            )),
+            HtmlTag::TableData | HtmlTag::TableHeader => Ok(Element::Table(
+                TableElement::deserialize_from_map(tag, map)?,
+            )),
+            HtmlTag::Break => Ok(Element::LineBreak(LineBreak::deserialize_from_map(
+                tag, map,
+            )?)),
+            HtmlTag::Img => Ok(Element::Image(ImageElement::deserialize_from_map(
+                tag, map,
+            )?)),
         }
-        arr[0]
-            .as_str()
-            .ok_or("First element of Element array must be a tag string".to_string())?
-    } else {
-        return Err(format!(
-            "Element must be a map or an array, but was: {value:?}"
-        ));
-    };
+    }
 
-    // Use `serde_json::from_value` to deserialize into the correct concrete struct.
-    // We must clone `value` because `from_value` consumes it.
-    let result = match tag_str {
-        "a" => serde_json::from_value(value.clone()).map(Element::Link),
-        "div" | "span" | "ol" | "ul" | "li" | "details" | "summary" => {
-            serde_json::from_value(value.clone()).map(Element::Styled)
+    pub fn deserialize_from_buffered_map(
+        tag: HtmlTag,
+        fields: IndexMap<CompactString, Value>,
+    ) -> Result<Self, String> {
+        match tag {
+            HtmlTag::Anchor => Ok(Element::Link(LinkElement::deserialize_from_value_map(
+                tag, fields,
+            )?)),
+            HtmlTag::Div
+            | HtmlTag::Span
+            | HtmlTag::OrderedList
+            | HtmlTag::UnorderedList
+            | HtmlTag::ListItem
+            | HtmlTag::Details
+            | HtmlTag::Summary => Ok(Element::Styled(StyledElement::deserialize_from_value_map(
+                tag, fields,
+            )?)),
+            HtmlTag::Ruby
+            | HtmlTag::RubyText
+            | HtmlTag::RubyParenthesis
+            | HtmlTag::Table
+            | HtmlTag::Thead
+            | HtmlTag::TableFooter
+            | HtmlTag::TableBody
+            | HtmlTag::TableRow
+            | HtmlTag::TableGeneric => Ok(Element::Unstyled(
+                UnstyledElement::deserialize_from_value_map(tag, fields)?,
+            )),
+            HtmlTag::TableData | HtmlTag::TableHeader => Ok(Element::Table(
+                TableElement::deserialize_from_value_map(tag, fields)?,
+            )),
+            HtmlTag::Break => Ok(Element::LineBreak(LineBreak::deserialize_from_value_map(
+                tag, fields,
+            )?)),
+            HtmlTag::Img => Ok(Element::Image(ImageElement::deserialize_from_value_map(
+                tag, fields,
+            )?)),
         }
-        "ruby" | "rt" | "rp" | "t" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "tb" | "tf" => {
-            serde_json::from_value(value.clone()).map(Element::Unstyled)
-        }
-        "td" | "th" => serde_json::from_value(value.clone()).map(Element::Table),
-        "br" => serde_json::from_value(value.clone()).map(Element::LineBreak),
-        "img" => serde_json::from_value(value.clone()).map(Element::Image),
-        unknown_tag => {
-            // Replicate the behavior of `Error::unknown_variant` by creating a useful error message.
-            let known_variants = &[
-                "a", "div", "span", "ol", "ul", "li", "details", "summary", "ruby", "rt", "rp",
-                "t", "table", "thead", "tbody", "tfoot", "tr", "tb", "tf", "td", "th", "br", "img",
-            ];
-            // We need to return a `Result<_, serde_json::Error>` to match the other arms.
-            // A simple way is to create an `io::Error`.
-            return Err(format!(
-                "unknown variant `{unknown_tag}`, expected one of {known_variants:?}"
-            ));
-        }
-    };
-
-    // Add the detailed final error message, which is very helpful for debugging.
-    result.map_err(|e| {
-        format!(
-            "Failed to deserialize Element with tag '{tag_str}'. Error: {e}. Original value was: {value}"
-        )
-    })
+    }
 }
 
 impl<'de> Deserialize<'de> for Element {
@@ -905,7 +1036,6 @@ impl<'de> Deserialize<'de> for Element {
 /// appear within a `"content":` section.
 #[skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize)]
-#[serde(untagged)]
 pub enum Element {
     /// An unknown string.
     UnknownString(String),
@@ -953,7 +1083,7 @@ pub struct UnstyledElement {
     /// The content of the element.
     pub content: Option<ContentMatchType>,
     /// The data of the element.
-    pub data: Option<IndexMap<String, String>>,
+    pub data: Option<IndexMap<CompactString, CompactString>>,
     /// Defines the language of an element in the format defined by RFC 5646.
     lang: Option<CompactString>,
 }
@@ -971,7 +1101,7 @@ pub struct TableElement {
     /// The content of the element.
     pub content: Option<ContentMatchType>,
     /// The data of the element.
-    pub data: Option<IndexMap<String, String>>,
+    pub data: Option<IndexMap<CompactString, CompactString>>,
     /// The column span of the element.
     pub col_span: Option<u16>,
     /// The row span of the element.
@@ -1003,7 +1133,7 @@ impl<'de> Deserialize<'de> for TableElement {
             {
                 // Field 1: Tag (required, always first)
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 // Now, we handle the rest of the fields which might be optional or in any order.
@@ -1027,16 +1157,23 @@ impl<'de> Deserialize<'de> for TableElement {
                         continue; // Go to next item in sequence
                     }
 
-                    // Try to see if it's a style object
-                    if let Ok(s) = serde_json::from_value::<StructuredContentStyle>(value.clone()) {
-                        style = Some(s);
-                        continue;
-                    }
+                    if value.is_object() {
+                        // Try to see if it's a style object
+                        if let Ok(s) =
+                            serde_json::from_value::<StructuredContentStyle>(value.clone())
+                        {
+                            style = Some(s);
+                            continue;
+                        }
 
-                    // Try to see if it's a data object
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
-                        data = Some(d);
-                        continue;
+                        // Try to see if it's a data object
+                        if let Ok(d) = serde_json::from_value::<
+                            IndexMap<CompactString, CompactString>,
+                        >(value.clone())
+                        {
+                            data = Some(d);
+                            continue;
+                        }
                     }
 
                     // If it's none of the above, it must be the content.
@@ -1079,7 +1216,9 @@ impl<'de> Deserialize<'de> for TableElement {
                 Ok(TableElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     col_span: helper.col_span,
                     row_span: helper.row_span,
                     style: helper.style,
@@ -1111,7 +1250,7 @@ pub struct StyledElement {
     /// The content of the element.
     pub content: Option<ContentMatchType>,
     /// The data of the element.
-    pub data: Option<IndexMap<String, String>>,
+    pub data: Option<IndexMap<CompactString, CompactString>>,
     /// The style of the element.
     pub style: Option<StructuredContentStyle>,
     /// Hover text for the element.
@@ -1156,7 +1295,7 @@ where
 
         // Tag is always first and required.
         let tag: String = seq
-            .next_element()? 
+            .next_element()?
             .ok_or_else(|| de::Error::invalid_length(0, &"tag"))?;
         map.insert("tag".to_string(), Value::String(tag));
 
@@ -1229,7 +1368,7 @@ pub struct LinkElement {
     /// Defines the language of an element in the format defined by RFC 5646.
     ///
     ///yomichan_rs will currently only support `ja` & `ja-JP`.
-    pub lang: Option<String>,
+    pub lang: Option<CompactString>,
 }
 
 /// A number or a string.
@@ -1260,7 +1399,7 @@ pub struct ImageElement {
     /// The units for the width and height.
     pub size_units: Option<SizeUnits>,
     /// The data of the element.
-    pub data: Option<IndexMap<String, String>>,
+    pub data: Option<IndexMap<CompactString, CompactString>>,
     /// Path to the image file in the archive.
     pub path: CompactString,
     /// Preferred width of the image.
@@ -1293,11 +1432,564 @@ pub struct ImageElement {
     collapsible: Option<bool>,
 }
 
-// ===================================================================
-//
-//          MANUAL DESERIALIZE IMPLEMENTATIONS FOR ELEMENTS
-//
-// ===================================================================
+impl LinkElement {
+    pub fn deserialize_from_map<'de, A>(tag: HtmlTag, mut map: A) -> Result<Self, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut content = None;
+        let mut href = None;
+        let mut lang = None;
+        while let Some(key) = map.next_key::<CompactString>()? {
+            match key.as_str() {
+                "tag" => {
+                    let _: HtmlTag = map.next_value()?;
+                }
+                "content" => content = Some(map.next_value()?),
+                "href" => href = Some(map.next_value()?),
+                "lang" => lang = Some(map.next_value()?),
+                _ => {
+                    let _: de::IgnoredAny = map.next_value()?;
+                }
+            }
+        }
+        let href = href.ok_or_else(|| de::Error::missing_field("href"))?;
+        Ok(Self {
+            tag,
+            content,
+            href,
+            lang,
+        })
+    }
+
+    pub fn deserialize_from_value_map(
+        tag: HtmlTag,
+        mut fields: IndexMap<CompactString, Value>,
+    ) -> Result<Self, String> {
+        let content = fields
+            .swap_remove("content")
+            .map(serde_json::from_value::<ContentMatchType>)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let href = fields
+            .swap_remove("href")
+            .map(serde_json::from_value::<CompactString>)
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "missing field href".to_string())?;
+        let lang = fields
+            .swap_remove("lang")
+            .map(serde_json::from_value::<CompactString>)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            tag,
+            content,
+            href,
+            lang,
+        })
+    }
+
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl StyledElement {
+    pub fn deserialize_from_map<'de, A>(tag: HtmlTag, mut map: A) -> Result<Self, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut content = None;
+        let mut data = None;
+        let mut style = None;
+        let mut title = None;
+        let mut open = None;
+        let mut lang = None;
+        while let Some(key) = map.next_key::<CompactString>()? {
+            match key.as_str() {
+                "tag" => {
+                    let _: HtmlTag = map.next_value()?;
+                }
+                "content" => content = Some(map.next_value()?),
+                "data" => data = Some(map.next_value()?),
+                "style" => style = Some(map.next_value()?),
+                "title" => title = Some(map.next_value()?),
+                "open" => open = Some(map.next_value()?),
+                "lang" => lang = Some(map.next_value()?),
+                _ => {
+                    let _: de::IgnoredAny = map.next_value()?;
+                }
+            }
+        }
+        Ok(Self {
+            tag,
+            content,
+            data,
+            style,
+            title,
+            open,
+            lang,
+        })
+    }
+
+    pub fn deserialize_from_value_map(
+        tag: HtmlTag,
+        mut fields: IndexMap<CompactString, Value>,
+    ) -> Result<Self, String> {
+        let content = fields
+            .swap_remove("content")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let data = fields
+            .swap_remove("data")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let style = fields
+            .swap_remove("style")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let title = fields
+            .swap_remove("title")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let open = fields
+            .swap_remove("open")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let lang = fields
+            .swap_remove("lang")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            tag,
+            content,
+            data,
+            style,
+            title,
+            open,
+            lang,
+        })
+    }
+
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl UnstyledElement {
+    pub fn deserialize_from_map<'de, A>(tag: HtmlTag, mut map: A) -> Result<Self, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut content = None;
+        let mut data = None;
+        let mut lang = None;
+        while let Some(key) = map.next_key::<CompactString>()? {
+            match key.as_str() {
+                "tag" => {
+                    let _: HtmlTag = map.next_value()?;
+                }
+                "content" => content = Some(map.next_value()?),
+                "data" => data = Some(map.next_value()?),
+                "lang" => lang = Some(map.next_value()?),
+                _ => {
+                    let _: de::IgnoredAny = map.next_value()?;
+                }
+            }
+        }
+        Ok(Self {
+            tag,
+            content,
+            data,
+            lang,
+        })
+    }
+
+    pub fn deserialize_from_value_map(
+        tag: HtmlTag,
+        mut fields: IndexMap<CompactString, Value>,
+    ) -> Result<Self, String> {
+        let content = fields
+            .swap_remove("content")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let data = fields
+            .swap_remove("data")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let lang = fields
+            .swap_remove("lang")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            tag,
+            content,
+            data,
+            lang,
+        })
+    }
+
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl TableElement {
+    pub fn deserialize_from_map<'de, A>(tag: HtmlTag, mut map: A) -> Result<Self, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut content = None;
+        let mut data = None;
+        let mut col_span = None;
+        let mut row_span = None;
+        let mut style = None;
+        let mut lang = None;
+        while let Some(key) = map.next_key::<CompactString>()? {
+            match key.as_str() {
+                "tag" => {
+                    let _: HtmlTag = map.next_value()?;
+                }
+                "content" => content = Some(map.next_value()?),
+                "data" => data = Some(map.next_value()?),
+                "colSpan" => col_span = Some(map.next_value()?),
+                "rowSpan" => row_span = Some(map.next_value()?),
+                "style" => style = Some(map.next_value()?),
+                "lang" => lang = Some(map.next_value()?),
+                _ => {
+                    let _: de::IgnoredAny = map.next_value()?;
+                }
+            }
+        }
+        Ok(Self {
+            tag,
+            content,
+            data,
+            col_span,
+            row_span,
+            style,
+            lang,
+        })
+    }
+
+    pub fn deserialize_from_value_map(
+        tag: HtmlTag,
+        mut fields: IndexMap<CompactString, Value>,
+    ) -> Result<Self, String> {
+        let content = fields
+            .swap_remove("content")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let data = fields
+            .swap_remove("data")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let col_span = fields
+            .swap_remove("colSpan")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let row_span = fields
+            .swap_remove("rowSpan")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let style = fields
+            .swap_remove("style")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let lang = fields
+            .swap_remove("lang")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        Ok(Self {
+            tag,
+            content,
+            data,
+            col_span,
+            row_span,
+            style,
+            lang,
+        })
+    }
+
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl LineBreak {
+    pub fn deserialize_from_map<'de, A>(tag: HtmlTag, mut map: A) -> Result<Self, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut data = None;
+        while let Some(key) = map.next_key::<CompactString>()? {
+            match key.as_str() {
+                "tag" => {
+                    let _: HtmlTag = map.next_value()?;
+                }
+                "data" => data = Some(map.next_value()?),
+                _ => {
+                    let _: de::IgnoredAny = map.next_value()?;
+                }
+            }
+        }
+        Ok(Self { tag, data })
+    }
+
+    pub fn deserialize_from_value_map(
+        tag: HtmlTag,
+        mut fields: IndexMap<CompactString, Value>,
+    ) -> Result<Self, String> {
+        let data = fields
+            .swap_remove("data")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        Ok(Self { tag, data })
+    }
+
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
+
+impl ImageElement {
+    pub fn deserialize_from_map<'de, A>(tag: HtmlTag, mut map: A) -> Result<Self, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut path = None;
+        let mut width = None;
+        let mut height = None;
+        let mut title = None;
+        let mut alt = None;
+        let mut description = None;
+        let mut pixelated = None;
+        let mut image_rendering = None;
+        let mut appearance = None;
+        let mut background = None;
+        let mut collapsed = None;
+        let mut collapsible = None;
+        let mut data = None;
+        let mut content = None;
+        let mut vertical_align = None;
+        let mut border = None;
+        let mut border_radius = None;
+        let mut size_units = None;
+
+        while let Some(key) = map.next_key::<CompactString>()? {
+            match key.as_str() {
+                "tag" => {
+                    let _: HtmlTag = map.next_value()?;
+                }
+                "path" => path = Some(map.next_value()?),
+                "width" => width = Some(map.next_value()?),
+                "height" => height = Some(map.next_value()?),
+                "title" => title = Some(map.next_value()?),
+                "alt" => alt = Some(map.next_value()?),
+                "description" => description = Some(map.next_value()?),
+                "pixelated" => pixelated = Some(map.next_value()?),
+                "imageRendering" => image_rendering = Some(map.next_value()?),
+                "appearance" => appearance = Some(map.next_value()?),
+                "background" => background = Some(map.next_value()?),
+                "collapsed" => collapsed = Some(map.next_value()?),
+                "collapsible" => collapsible = Some(map.next_value()?),
+                "data" => data = Some(map.next_value()?),
+                "content" => content = Some(map.next_value()?),
+                "verticalAlign" => vertical_align = Some(map.next_value()?),
+                "border" => border = Some(map.next_value()?),
+                "borderRadius" => border_radius = Some(map.next_value()?),
+                "sizeUnits" => size_units = Some(map.next_value()?),
+                _ => {
+                    let _: de::IgnoredAny = map.next_value()?;
+                }
+            }
+        }
+        let path = path.ok_or_else(|| de::Error::missing_field("path"))?;
+        Ok(Self {
+            tag,
+            path,
+            width,
+            height,
+            preferred_width: None,
+            preferred_height: None,
+            title,
+            alt,
+            description,
+            pixelated,
+            image_rendering,
+            appearance,
+            background,
+            collapsed,
+            collapsible,
+            data,
+            content,
+            vertical_align,
+            border,
+            border_radius,
+            size_units,
+        })
+    }
+
+    pub fn deserialize_from_value_map(
+        tag: HtmlTag,
+        mut fields: IndexMap<CompactString, Value>,
+    ) -> Result<Self, String> {
+        let path = fields
+            .swap_remove("path")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "missing field path".to_string())?;
+        let width = fields
+            .swap_remove("width")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let height = fields
+            .swap_remove("height")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let title = fields
+            .swap_remove("title")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let alt = fields
+            .swap_remove("alt")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let description = fields
+            .swap_remove("description")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let pixelated = fields
+            .swap_remove("pixelated")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let image_rendering = fields
+            .swap_remove("imageRendering")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let appearance = fields
+            .swap_remove("appearance")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let background = fields
+            .swap_remove("background")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let collapsed = fields
+            .swap_remove("collapsed")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let collapsible = fields
+            .swap_remove("collapsible")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let data = fields
+            .swap_remove("data")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let content = fields
+            .swap_remove("content")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let vertical_align = fields
+            .swap_remove("verticalAlign")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let border = fields
+            .swap_remove("border")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let border_radius = fields
+            .swap_remove("borderRadius")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        let size_units = fields
+            .swap_remove("sizeUnits")
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+
+        Ok(Self {
+            tag,
+            path,
+            width,
+            height,
+            preferred_width: None,
+            preferred_height: None,
+            title,
+            alt,
+            description,
+            pixelated,
+            image_rendering,
+            appearance,
+            background,
+            collapsed,
+            collapsible,
+            data,
+            content,
+            vertical_align,
+            border,
+            border_radius,
+            size_units,
+        })
+    }
+
+    pub fn deserialize_with_tag(tag: String, mut value: Value) -> Result<Self, String> {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("tag".to_string(), Value::String(tag));
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+}
 //
 // This section provides manual `Deserialize` implementations for all
 // element structs. This is necessary because the database can store
@@ -1347,7 +2039,9 @@ impl<'de> Deserialize<'de> for StyledElement {
                 Ok(StyledElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     style: helper.style,
                     title: helper.title.map(Into::into),
                     open: helper.open,
@@ -1361,7 +2055,7 @@ impl<'de> Deserialize<'de> for StyledElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
@@ -1381,12 +2075,17 @@ impl<'de> Deserialize<'de> for StyledElement {
                         continue;
                     }
 
-                    // Is it a map? -> `data`
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
-                        if data.is_none() {
-                            data = Some(d);
+                    if value.is_object() {
+                        // Is it a map? -> `data`
+                        if let Ok(d) = serde_json::from_value::<
+                            IndexMap<CompactString, CompactString>,
+                        >(value.clone())
+                        {
+                            if data.is_none() {
+                                data = Some(d);
+                            }
+                            continue;
                         }
-                        continue;
                     }
 
                     // Is it a string that isn't content yet? -> `title`
@@ -1491,7 +2190,9 @@ impl<'de> Deserialize<'de> for UnstyledElement {
                 Ok(UnstyledElement {
                     tag: helper.tag,
                     content: helper.content,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     lang: helper.lang.map(Into::into),
                 })
             }
@@ -1501,18 +2202,23 @@ impl<'de> Deserialize<'de> for UnstyledElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
                 let mut data = None;
 
                 while let Some(value) = seq.next_element::<Value>()? {
-                    if let Ok(d) = serde_json::from_value::<IndexMap<String, String>>(value.clone()) {
-                        if data.is_none() {
-                            data = Some(d);
+                    if value.is_object() {
+                        if let Ok(d) = serde_json::from_value::<
+                            IndexMap<CompactString, CompactString>,
+                        >(value.clone())
+                        {
+                            if data.is_none() {
+                                data = Some(d);
+                            }
+                            continue;
                         }
-                        continue;
                     }
                     if content.is_none() {
                         content = Some(serde_json::from_value(value).map_err(de::Error::custom)?);
@@ -1574,7 +2280,7 @@ impl<'de> Deserialize<'de> for LinkElement {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 let mut content = None;
@@ -1664,7 +2370,9 @@ impl<'de> Deserialize<'de> for ImageElement {
                     border: helper.border.map(Into::into),
                     border_radius: helper.border_radius.map(Into::into),
                     size_units: helper.size_units,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                     path: helper.path.into(),
                     width: helper.width,
                     height: helper.height,
@@ -1690,13 +2398,13 @@ impl<'de> Deserialize<'de> for ImageElement {
                 // Based on the log, the sequence appears to be:
                 // [tag, size_units, path, width, height, alt, appearance, pixelated, collapsed, collapsible]
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
 
                 // The rest of the fields have a fixed order in this compact format.
                 let size_units: Option<SizeUnits> = seq.next_element()?.unwrap_or(None);
                 let path: CompactString = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(2, &self))?;
                 let width: Option<f32> = seq.next_element()?.unwrap_or(None);
                 let height: Option<f32> = seq.next_element()?.unwrap_or(None);
@@ -1765,7 +2473,9 @@ impl<'de> Deserialize<'de> for LineBreak {
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
                 Ok(LineBreak {
                     tag: helper.tag,
-                    data: helper.data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
+                    data: helper
+                        .data
+                        .map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()),
                 })
             }
 
@@ -1774,14 +2484,80 @@ impl<'de> Deserialize<'de> for LineBreak {
                 A: SeqAccess<'de>,
             {
                 let tag: HtmlTag = seq
-                    .next_element()? 
+                    .next_element()?
                     .ok_or_else(|| de::Error::invalid_length(0, &self))?;
-                let data: Option<IndexMap<String, String>> = seq.next_element()?.unwrap_or(None);
+                let data: Option<IndexMap<CompactString, CompactString>> =
+                    seq.next_element()?.unwrap_or(None);
 
-                Ok(LineBreak { tag, data: data.map(|m| m.into_iter().map(|(k, v)| (k.into(), v.into())).collect()) })
+                Ok(LineBreak { tag, data })
             }
         }
 
         deserializer.deserialize_any(LineBreakVisitor)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_content_match_type_deserialization() {
+        // Test String
+        let json_str = json!("hello");
+        let content: ContentMatchType = serde_json::from_value(json_str).unwrap();
+        assert!(matches!(content, ContentMatchType::String(_)));
+
+        // Test Element
+        let json_el = json!({
+            "tag": "span",
+            "content": "inner"
+        });
+        let content: ContentMatchType = serde_json::from_value(json_el).unwrap();
+        if let ContentMatchType::Element(el) = content {
+            if let Element::Styled(s) = *el {
+                assert_eq!(s.tag, HtmlTag::Span);
+            } else {
+                panic!("Expected Styled element");
+            }
+        } else {
+            panic!("Expected Element variant");
+        }
+
+        // Test Content (Array)
+        let json_arr = json!(["item1", {"tag": "br"}]);
+        let content: ContentMatchType = serde_json::from_value(json_arr).unwrap();
+        if let ContentMatchType::Content(vec) = content {
+            assert_eq!(vec.len(), 2);
+        } else {
+            panic!("Expected Content variant");
+        }
+    }
+
+    #[test]
+    fn test_content_match_type_nested_structured_content() {
+        // This is what the user wants to support
+        let json_nested = json!({
+            "type": "structured-content",
+            "content": "nested string"
+        });
+
+        // This should now succeed with the manual implementation
+        let content: ContentMatchType = serde_json::from_value(json_nested).unwrap();
+        if let ContentMatchType::Element(el) = content {
+            if let Element::Styled(s) = *el {
+                assert_eq!(s.tag, HtmlTag::Div);
+                if let Some(ContentMatchType::String(inner)) = &s.content {
+                    assert_eq!(inner, "nested string");
+                } else {
+                    panic!("Expected inner content to be String");
+                }
+            } else {
+                panic!("Expected Styled element (Div)");
+            }
+        } else {
+            panic!("Expected Element variant");
+        }
     }
 }
