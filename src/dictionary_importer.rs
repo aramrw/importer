@@ -487,25 +487,43 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
     let dict_name = index.title.clone();
 
     // use `process_paths` where possible
+    #[cfg(feature = "trace")]
+    tracing::info!("Processing {} tag banks...", tag_bank_paths.len());
     let tag_list: Vec<DatabaseTag> = convert_tag_bank_files(tag_bank_paths, &dict_name)?
         .into_iter()
         .flatten()
         .collect();
 
+    #[cfg(feature = "trace")]
+    tracing::info!("Processing {} term banks...", term_bank_paths.len());
     let term_list: Vec<DatabaseTermEntryTuple> = process_paths(term_bank_paths, |path| {
+        #[cfg(feature = "trace")]
+        tracing::info!("Processing term bank: {:?}", path.file_name().unwrap_or_default());
         convert_term_bank_file(path, &dict_name)
     })?;
 
+    #[cfg(feature = "trace")]
+    tracing::info!("Processing {} kanji meta banks...", kanji_meta_bank_paths.len());
     let kanji_meta_list: Vec<DatabaseMetaFrequency> =
         process_paths(kanji_meta_bank_paths, |path| {
+            #[cfg(feature = "trace")]
+            tracing::info!("Processing kanji meta bank: {:?}", path.file_name().unwrap_or_default());
             DatabaseMetaMatchType::convert_kanji_meta_file(path, dict_name.clone())
         })?;
 
+    #[cfg(feature = "trace")]
+    tracing::info!("Processing {} term meta banks...", term_meta_bank_paths.len());
     let term_meta_list: Vec<DatabaseMetaMatchType> = process_paths(term_meta_bank_paths, |path| {
+        #[cfg(feature = "trace")]
+        tracing::info!("Processing term meta bank: {:?}", path.file_name().unwrap_or_default());
         DatabaseMetaMatchType::convert_term_meta_file(path, dict_name.clone())
     })?;
 
+    #[cfg(feature = "trace")]
+    tracing::info!("Processing {} kanji banks...", kanji_bank_paths.len());
     let kanji_list: Vec<DatabaseKanjiEntry> = process_paths(kanji_bank_paths, |path| {
+        #[cfg(feature = "trace")]
+        tracing::info!("Processing kanji bank: {:?}", path.file_name().unwrap_or_default());
         convert_kanji_bank(path, &dict_name)
     })?;
 

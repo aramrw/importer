@@ -240,7 +240,7 @@ impl<'de> Deserialize<'de> for ContentMatchType {
 /// # Fields
 /// * `plain_text: String` - Usable in all programs for simple rendering of definitions
 /// * `html: Option<String>` - Node tree parsed as html
-#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug, Eq, Hash)]
 pub struct TermGlossaryContentGroup {
     // this is used for programs that cannot render html
     pub plain_text: CompactString,
