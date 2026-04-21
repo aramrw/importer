@@ -1,7 +1,8 @@
 //! Contains the error types for the library.
 
-use crate::{dictionary_importer::DictionarySummaryError};
+use crate::dictionary_importer::DictionarySummaryError;
 use std::{
+    error::Error,
     io,
     path::{Path, PathBuf},
 };
@@ -36,10 +37,24 @@ pub enum ImportZipError {
     DoesNotExist(PathBuf),
     /// A zip crate error.
     #[error("zip crate error: {0}")]
-    ZipCrate(#[from] zip::result::ZipError),
+    ZipCrate(#[from] Box<dyn Error>),
     /// A filesystem IO error.
     #[error("filesystemIO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("any: {0}")]
+    Any(Box<dyn std::error::Error>),
+}
+
+impl From<ImportZipError> for std::io::Error {
+    fn from(err: ImportZipError) -> Self {
+        match err {
+            // If the error is already an IO error,
+            // extract it directly to prevent double-wrapping
+            ImportZipError::Io(io_err) => io_err,
+            // Wrap all other custom variants into a generic IO error
+            other => std::io::Error::new(std::io::ErrorKind::Other, other.to_string()),
+        }
+    }
 }
 
 impl ImportZipError {

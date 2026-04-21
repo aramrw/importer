@@ -95,9 +95,20 @@ mod importer_tests {
             .try_init();
 
         let path = std::path::Path::new("./dictionaries/wty-es-en");
+        let _: DatabaseDictionaryData = import_dictionary(path).unwrap();
+    }
+
+    #[ignore]
+    #[test]
+    fn dict_write_data() {
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .try_init();
+
+        let path = std::path::Path::new("./dictionaries/wty-es-en");
         let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
-        //let mut buf = String::new();
-        // std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
+        let data_pretty = serde_json::to_string_pretty(&data).unwrap();
+        std::fs::write("./data.json", data_pretty).unwrap();
     }
 
     #[ignore]
@@ -114,8 +125,7 @@ mod importer_tests {
             .with_max_level(tracing::Level::DEBUG)
             .try_init();
         let path = std::path::Path::new("./dictionaries/wty-es-es");
-        let data: DatabaseDictionaryData = import_dictionary(path).unwrap();
-        //std::fs::write("./data.json", serde_json::to_string_pretty(&data).unwrap()).unwrap();
+        let _: DatabaseDictionaryData = import_dictionary(path).unwrap();
 
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         if let Ok(report) = guard.report().build() {

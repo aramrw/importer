@@ -1,11 +1,14 @@
 #!/usr/bin/env nu
 
-# Define the function to run the tests
-def run_tests [features: list<string>] {
-    RUSTFLAGS="-Awarnings" RUST_LOG=debug cargo test dict --release --features ($features | str join ",") -- --show-output
+def run_tests [
+    test_names: list<string>,
+] {
+    let features = ["full"]
+    let feature_str = ($features | str join ",")
+    # Place test_names AFTER the -- to pass them to the test runner
+    RUSTFLAGS="-Awarnings" RUST_LOG=debug cargo test --release --features $feature_str -- ...$test_names --show-output
 }
 
-# Call the function with the captured arguments
 export def main [...rest: string] {
-    run_tests $rest
+    run_tests ["dict", "unit_test::import_zip"]
 }

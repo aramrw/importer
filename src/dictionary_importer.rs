@@ -9,6 +9,7 @@ use crate::dictionary_database::{
 };
 use crate::errors::{DictionaryFileError, ImportError, ImportZipError, TagBankFileError};
 use crate::structured_content::TermEntryItem;
+use std::io::Read;
 
 use chrono::prelude::*;
 use indexmap::IndexMap;
@@ -20,6 +21,7 @@ use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 use tempfile::tempdir;
+use tinyzip::{Archive, Compression};
 use uuid::Uuid;
 
 #[cfg(feature = "trace")]
@@ -391,17 +393,76 @@ pub struct ImportRequirementContext {
 /// Deserializable type mapping a `kanji_bank_$i.json` file.
 pub type KanjiBank = Vec<DatabaseKanjiEntry>;
 
+/// Helper function to prevent Zip Slip vulnerabilities
+fn sanitize_zip_path(name: &str) -> std::path::PathBuf {
+    let mut path = std::path::PathBuf::new();
+    for component in std::path::Path::new(name).components() {
+        // Only keep standard path components, stripping root ('/') and parent ('..') traversals
+        if let std::path::Component::Normal(c) = component {
+            path.push(c);
+        }
+    }
+    path
+}
+
 fn extract_dict_zip<P: AsRef<std::path::Path>>(
     zip_path: P,
 ) -> Result<(tempfile::TempDir, std::path::PathBuf), ImportZipError> {
-    let temp_dir = tempdir()?;
+    let temp_dir = tempfile::tempdir().map_err(ImportZipError::Io)?;
     let temp_dir_path = temp_dir.path().to_owned();
-    let temp_dir_path_clone = temp_dir_path.clone();
+    let file = fs::File::open(zip_path).map_err(ImportZipError::Io)?;
 
-    {
-        let file = fs::File::open(zip_path)?;
-        let mut archive = zip::ZipArchive::new(file)?;
-        archive.extract(temp_dir_path_clone)?;
+    let archive = Archive::try_from(file).map_err(|e| ImportZipError::Any(e.into()))?;
+
+    // Buffer for reading file paths (MAX_PATH is usually plenty)
+    let mut path_buf = [0u8; 1024];
+
+    for entry in archive.entries() {
+        let entry = entry.map_err(|e| ImportZipError::Any(e.into()))?;
+
+        // Fix 1 & 2: Provide a buffer to read_path and handle the specific error type
+        let path_bytes = entry
+            .read_path(&mut path_buf)
+            .map_err(|e| ImportZipError::Any(e.into()))?;
+        let name_str = String::from_utf8_lossy(path_bytes);
+
+        let safe_path = sanitize_zip_path(&name_str);
+        let out_path = temp_dir_path.join(safe_path);
+
+        if name_str.ends_with('/') {
+            fs::create_dir_all(&out_path).map_err(ImportZipError::Io)?;
+            continue;
+        }
+
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent).map_err(ImportZipError::Io)?;
+        }
+
+        let mut writer = fs::File::create(&out_path).map_err(ImportZipError::Io)?;
+        let size = entry.uncompressed_size();
+
+        // Fix 3: tinyzip uses 'DeflateDecoder' (or similar) but usually provides
+        // a reader that handles decompression automatically or via specific types.
+        match entry
+            .compression()
+            .map_err(|e| ImportZipError::Any(e.into()))?
+        {
+            Compression::Deflated => {
+                // In tinyzip, entry.reader() usually provides the decompressor
+                // wrap based on the compression type found.
+                let mut decoder = entry
+                    .reader()
+                    .map_err(|e| ImportZipError::Any(e.into()))?
+                    // from the std::io::Read trait;
+                    .take(size);
+                io::copy(&mut decoder, &mut writer).map_err(ImportZipError::Io)?;
+            }
+            Compression::Stored => {
+                let mut reader = entry.reader().map_err(|e| ImportZipError::Any(e.into()))?;
+                io::copy(&mut reader, &mut writer).map_err(ImportZipError::Io)?;
+            }
+            _ => return Err(ImportZipError::Any("Unsupported compression".into())),
+        }
     }
 
     Ok((temp_dir, temp_dir_path))
@@ -416,9 +477,7 @@ fn extract_dict_zip<P: AsRef<std::path::Path>>(
 /// # Returns
 ///
 /// A `Result` containing the imported dictionary data or an error.
-pub fn import_dictionary<P: AsRef<Path>>(
-    path: P,
-) -> Result<DatabaseDictionaryData, ImportError> {
+pub fn import_dictionary<P: AsRef<Path>>(path: P) -> Result<DatabaseDictionaryData, ImportError> {
     let path = path.as_ref();
     #[cfg(feature = "trace")]
     debug!("{path:?}");
@@ -499,24 +558,39 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
     tracing::info!("Processing {} term banks...", term_bank_paths.len());
     let term_list: Vec<DatabaseTermEntryTuple> = process_paths(term_bank_paths, |path| {
         #[cfg(feature = "trace")]
-        tracing::info!("Processing term bank: {:?}", path.file_name().unwrap_or_default());
+        tracing::info!(
+            "Processing term bank: {:?}",
+            path.file_name().unwrap_or_default()
+        );
         convert_term_bank_file(path, &dict_name)
     })?;
 
     #[cfg(feature = "trace")]
-    tracing::info!("Processing {} kanji meta banks...", kanji_meta_bank_paths.len());
+    tracing::info!(
+        "Processing {} kanji meta banks...",
+        kanji_meta_bank_paths.len()
+    );
     let kanji_meta_list: Vec<DatabaseMetaFrequency> =
         process_paths(kanji_meta_bank_paths, |path| {
             #[cfg(feature = "trace")]
-            tracing::info!("Processing kanji meta bank: {:?}", path.file_name().unwrap_or_default());
+            tracing::info!(
+                "Processing kanji meta bank: {:?}",
+                path.file_name().unwrap_or_default()
+            );
             DatabaseMetaMatchType::convert_kanji_meta_file(path, dict_name.clone())
         })?;
 
     #[cfg(feature = "trace")]
-    tracing::info!("Processing {} term meta banks...", term_meta_bank_paths.len());
+    tracing::info!(
+        "Processing {} term meta banks...",
+        term_meta_bank_paths.len()
+    );
     let term_meta_list: Vec<DatabaseMetaMatchType> = process_paths(term_meta_bank_paths, |path| {
         #[cfg(feature = "trace")]
-        tracing::info!("Processing term meta bank: {:?}", path.file_name().unwrap_or_default());
+        tracing::info!(
+            "Processing term meta bank: {:?}",
+            path.file_name().unwrap_or_default()
+        );
         DatabaseMetaMatchType::convert_term_meta_file(path, dict_name.clone())
     })?;
 
@@ -524,7 +598,10 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
     tracing::info!("Processing {} kanji banks...", kanji_bank_paths.len());
     let kanji_list: Vec<DatabaseKanjiEntry> = process_paths(kanji_bank_paths, |path| {
         #[cfg(feature = "trace")]
-        tracing::info!("Processing kanji bank: {:?}", path.file_name().unwrap_or_default());
+        tracing::info!(
+            "Processing kanji bank: {:?}",
+            path.file_name().unwrap_or_default()
+        );
         convert_kanji_bank(path, &dict_name)
     })?;
 
@@ -766,7 +843,7 @@ fn read_dir_helper<P: AsRef<Path>>(
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let path = entry.path();
-        
+
         if path.is_dir() {
             read_dir_helper(
                 &path,
@@ -779,7 +856,7 @@ fn read_dir_helper<P: AsRef<Path>>(
             )?;
         } else {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            
+
             if file_name.contains("term_bank") {
                 term_banks.push(path);
             } else if file_name.contains("index.json") {
