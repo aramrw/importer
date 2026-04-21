@@ -4,6 +4,7 @@ version = "0.0.1"
 edition = "2024"
 description = "A Yomichan/Yomitan dictionary deserializer"
 repository = "https://github.com/aramrw/importer"
+license = "MIT"
 
 [dependencies]
 serde = { version = "1.0", features = ["rc"] }
