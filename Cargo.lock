@@ -835,40 +835,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "importer"
-version = "0.0.1"
-dependencies = [
- "better_default",
- "bimap",
- "chrono",
- "compact_str",
- "derivative",
- "derive_more",
- "fancy-regex",
- "getset",
- "indexmap 2.7.1",
- "memchr",
- "parking_lot",
- "pprof",
- "pretty_assertions",
- "rayon",
- "rmp-serde",
- "rmpv",
- "serde",
- "serde-untagged",
- "serde_json",
- "serde_with",
- "simd-json",
- "tempfile",
- "thiserror 2.0.12",
- "tracing",
- "tracing-subscriber",
- "url",
- "uuid",
- "zip",
-]
-
-[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2278,6 +2244,40 @@ dependencies = [
  "quote",
  "syn 2.0.104",
  "synstructure",
+]
+
+[[package]]
+name = "yomichan_importer"
+version = "0.0.1"
+dependencies = [
+ "better_default",
+ "bimap",
+ "chrono",
+ "compact_str",
+ "derivative",
+ "derive_more",
+ "fancy-regex",
+ "getset",
+ "indexmap 2.7.1",
+ "memchr",
+ "parking_lot",
+ "pprof",
+ "pretty_assertions",
+ "rayon",
+ "rmp-serde",
+ "rmpv",
+ "serde",
+ "serde-untagged",
+ "serde_json",
+ "serde_with",
+ "simd-json",
+ "tempfile",
+ "thiserror 2.0.12",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "zip",
 ]
 
 [[package]]
