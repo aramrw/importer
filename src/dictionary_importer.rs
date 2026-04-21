@@ -15,6 +15,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 #[cfg(not(feature = "simd"))]
 use serde_json::Deserializer as JsonDeserializer;
+use std::error::Error;
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
@@ -668,6 +669,8 @@ fn convert_term_bank_file(
 
     #[cfg(not(feature = "simd"))]
     let entries: Vec<TermEntryItem> = {
+        use std::io::BufReader;
+
         let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
             outpath: outpath.clone(),
             reason: reason.to_string(),
@@ -678,6 +681,7 @@ fn convert_term_bank_file(
         match stream.next() {
             Some(Ok(entries)) => entries,
             Some(Err(reason)) => {
+                let reason: Box<dyn Error> = Box::new(reason);
                 eprintln!("{outpath:?} failed:\nreason: {reason}");
                 return Err(crate::errors::DictionaryFileError::File {
                     outpath,
