@@ -608,6 +608,8 @@ fn convert_kanji_bank(
 ) -> Result<Vec<DatabaseKanjiEntry>, DictionaryFileError> {
     #[cfg(not(feature = "simd"))]
     let mut entries = {
+        use std::io::BufReader;
+
         let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
             outpath: outpath.clone(),
             reason: reason.to_string(),
