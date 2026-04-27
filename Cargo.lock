@@ -2181,6 +2181,7 @@ dependencies = [
  "derivative",
  "derive_more",
  "fancy-regex",
+ "flate2",
  "getset",
  "indexmap 2.7.1",
  "parking_lot",

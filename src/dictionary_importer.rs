@@ -407,9 +407,10 @@ fn sanitize_zip_path(name: &str) -> std::path::PathBuf {
 
 fn extract_dict_zip<P: AsRef<std::path::Path>>(
     zip_path: P,
-) -> Result<(tempfile::TempDir, std::path::PathBuf), ImportZipError> {
-    let temp_dir = tempfile::tempdir().map_err(ImportZipError::Io)?;
-    let temp_dir_path = temp_dir.path().to_owned();
+) -> Result<std::path::PathBuf, ImportZipError> {
+    let temp_dir_path = std::env::temp_dir().join(format!("yomichan_debug_unzip_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_dir_path).map_err(ImportZipError::Io)?;
+    eprintln!("Extracting to debug directory: {:?}", temp_dir_path);
     let file = fs::File::open(zip_path).map_err(ImportZipError::Io)?;
 
     let archive = Archive::try_from(file).map_err(|e| ImportZipError::Any(e.into()))?;
@@ -448,24 +449,21 @@ fn extract_dict_zip<P: AsRef<std::path::Path>>(
             .map_err(|e| ImportZipError::Any(e.into()))?
         {
             Compression::Deflated => {
-                // In tinyzip, entry.reader() usually provides the decompressor
-                // wrap based on the compression type found.
-                let mut decoder = entry
-                    .reader()
-                    .map_err(|e| ImportZipError::Any(e.into()))?
-                    // from the std::io::Read trait;
-                    .take(size);
-                io::copy(&mut decoder, &mut writer).map_err(ImportZipError::Io)?;
+                let reader = entry.reader().map_err(|e| ImportZipError::Any(e.into()))?;
+                let mut decoder = flate2::read::DeflateDecoder::new(reader);
+                let copied = io::copy(&mut decoder, &mut writer).map_err(ImportZipError::Io)?;
+                eprintln!("Extracted {:?} ({} bytes)", out_path, copied);
             }
             Compression::Stored => {
                 let mut reader = entry.reader().map_err(|e| ImportZipError::Any(e.into()))?;
-                io::copy(&mut reader, &mut writer).map_err(ImportZipError::Io)?;
+                let copied = io::copy(&mut reader, &mut writer).map_err(ImportZipError::Io)?;
+                eprintln!("Extracted {:?} ({} bytes / expected {} bytes)", out_path, copied, size);
             }
             _ => return Err(ImportZipError::Any("Unsupported compression".into())),
         }
     }
 
-    Ok((temp_dir, temp_dir_path))
+    Ok(temp_dir_path)
 }
 
 /// Imports a Yomichan dictionary from a zip or folder
@@ -486,7 +484,7 @@ pub fn import_dictionary<P: AsRef<Path>>(path: P) -> Result<DatabaseDictionaryDa
         let data: DatabaseDictionaryData = prepare_dictionary(path)?;
         Ok(data)
     } else {
-        let (_temp_dir, extracted_path) = extract_dict_zip(path)?;
+        let extracted_path = extract_dict_zip(path)?;
         let data: DatabaseDictionaryData = prepare_dictionary(extracted_path)?;
         Ok(data)
     }
@@ -650,8 +648,11 @@ fn convert_tag_bank_files(
     outpaths
         .into_iter()
         .map(|p| {
-            let tag_str = fs::read_to_string(p)?;
-            let tag: Vec<DictionaryDataTag> = serde_json::from_str(&tag_str)?;
+            let tag_bytes = fs::read(&p).map_err(|e| { eprintln!("Failed to read tag file {:?}: {}", p, e); TagBankFileError::Io(e) })?;
+            let tag: Vec<DictionaryDataTag> = serde_json::from_slice(&tag_bytes).map_err(|e| {
+                eprintln!("CRITICAL ERROR: Failed to deserialize tag file {:?}. Error: {}", p, e);
+                TagBankFileError::Json(e)
+            })?;
             let res = tag
                 .into_iter()
                 .map(|tag| {
@@ -686,15 +687,16 @@ fn convert_kanji_bank(
 ) -> Result<Vec<DatabaseKanjiEntry>, DictionaryFileError> {
     #[cfg(not(feature = "simd"))]
     let mut entries = {
-        use std::io::BufReader;
-
-        let file = fs::File::open(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
-            outpath: outpath.clone(),
-            reason: reason.to_string(),
+        let json_bytes = fs::read(&outpath).map_err(|reason| {
+            eprintln!("Failed to read {:?}: {}", outpath, reason);
+            DictionaryFileError::FailedOpen {
+                outpath: outpath.clone(),
+                reason: reason.to_string(),
+            }
         })?;
-        let reader = BufReader::with_capacity(128 * 1024, file);
+        eprintln!("Reading {:?} with {} bytes", &outpath, json_bytes.len());
 
-        let mut stream = JsonDeserializer::from_reader(reader).into_iter::<KanjiBank>();
+        let mut stream = JsonDeserializer::from_slice(&json_bytes).into_iter::<KanjiBank>();
         match stream.next() {
             Some(Ok(entries)) => entries,
             Some(Err(reason)) => {
@@ -709,18 +711,22 @@ fn convert_kanji_bank(
 
     #[cfg(feature = "simd")]
     let mut entries: KanjiBank = {
-        let mut json_string =
-            fs::read_to_string(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+        let mut json_bytes =
+            fs::read(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
                 outpath: outpath.clone(),
                 reason: reason.to_string(),
             })?;
-        let json_bytes = unsafe { json_string.as_bytes_mut() };
-        simd_json::from_slice(json_bytes).map_err(|err| {
-            crate::errors::DictionaryFileError::File {
-                outpath: outpath.clone(),
-                reason: err.to_string(),
-            }
-        })?
+        
+        let res: Result<KanjiBank, _> = simd_json::from_slice(&mut json_bytes);
+        if let Err(e) = &res {
+            eprintln!("CRITICAL ERROR: Failed to deserialize file: {:?}. Error: {}. Bytes length: {}", outpath, e, json_bytes.len());
+            return Err(crate::errors::DictionaryFileError::File {
+                outpath,
+                reason: format!("JSON deserialization failed: {}. Bytes length: {}", e, json_bytes.len()),
+            });
+        }
+
+        res.unwrap()
     };
 
     for item in &mut entries {
@@ -771,18 +777,21 @@ fn convert_term_bank_file(
 
     #[cfg(feature = "simd")]
     let entries: Vec<TermEntryItem> = {
-        let mut json_string =
-            fs::read_to_string(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+        let mut json_bytes =
+            fs::read(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
                 outpath: outpath.clone(),
                 reason: reason.to_string(),
             })?;
-        let json_bytes = unsafe { json_string.as_bytes_mut() };
-        simd_json::from_slice(json_bytes).map_err(|err| {
-            crate::errors::DictionaryFileError::File {
-                outpath: outpath.clone(),
-                reason: err.to_string(),
-            }
-        })?
+        let res: Result<Vec<TermEntryItem>, _> = simd_json::from_slice(&mut json_bytes);
+        if let Err(e) = &res {
+            eprintln!("CRITICAL ERROR: Failed to deserialize file: {:?}. Error: {}. Bytes length: {}", outpath, e, json_bytes.len());
+            return Err(crate::errors::DictionaryFileError::File {
+                outpath,
+                reason: format!("JSON deserialization failed: {}. Bytes length: {}", e, json_bytes.len()),
+            });
+        }
+
+        res.unwrap()
     };
 
     // Beginning of each word/phrase/expression (entry)

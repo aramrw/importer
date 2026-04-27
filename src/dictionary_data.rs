@@ -137,12 +137,25 @@ impl YomichanIndexFile {
     pub fn convert_index_file(
         outpath: std::path::PathBuf,
     ) -> Result<YomichanIndexFile, ImportError> {
-        let index_str =
-            std::fs::read_to_string(&outpath).map_err(|e| DictionaryFileError::File {
-                outpath,
+        println!("DEBUG: Calling convert_index_file for {:?}", outpath);
+        let index_bytes =
+            std::fs::read(&outpath).map_err(|e| DictionaryFileError::File {
+                outpath: outpath.clone(),
                 reason: e.to_string(),
             })?;
-        let index: YomichanIndexFile = serde_json::from_str(&index_str)?;
+        
+        let json_bytes = if index_bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            &index_bytes[3..]
+        } else {
+            &index_bytes
+        };
+
+        let index: YomichanIndexFile = serde_json::from_slice(json_bytes)
+            .map_err(|e| {
+                let full_hex: String = json_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+                panic!("CRITICAL_DEBUG: JSON deserialization failed for {:?}: {}. Full bytes (hex): {}", outpath, e, full_hex);
+            }).unwrap();
+        
         Ok(index)
     }
 }

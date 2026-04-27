@@ -346,13 +346,12 @@ impl DatabaseMetaMatchType {
 
         #[cfg(feature = "simd")]
         let mut entries: Vec<DatabaseMetaFrequency> = {
-            let mut json_string =
-                fs::read_to_string(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+            let mut json_bytes =
+                fs::read(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
                     outpath: outpath.clone(),
                     reason: reason.to_string(),
                 })?;
-            let json_bytes = unsafe { json_string.as_bytes_mut() };
-            simd_json::from_slice(json_bytes).map_err(|err| {
+            simd_json::from_slice(&mut json_bytes).map_err(|err| {
                 crate::errors::DictionaryFileError::File {
                     outpath: outpath.clone(),
                     reason: err.to_string(),
@@ -395,13 +394,12 @@ impl DatabaseMetaMatchType {
 
         #[cfg(feature = "simd")]
         let entries: Vec<TermMeta> = {
-            let mut json_string =
-                fs::read_to_string(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
+            let mut json_bytes =
+                fs::read(&outpath).map_err(|reason| DictionaryFileError::FailedOpen {
                     outpath: outpath.clone(),
                     reason: reason.to_string(),
                 })?;
-            let json_bytes = unsafe { json_string.as_bytes_mut() };
-            simd_json::from_slice(json_bytes).map_err(|err| {
+            simd_json::from_slice(&mut json_bytes).map_err(|err| {
                 crate::errors::DictionaryFileError::File {
                     outpath: outpath.clone(),
                     reason: err.to_string(),
