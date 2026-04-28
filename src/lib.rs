@@ -7,11 +7,11 @@
 //! ```toml
 //! [dependencies]
 //! # features = ["simd", "rayon", "trace"]
-//! importer = { git = "https://github.com/aramrw/importer", features = ["rayon"] }
+//! yomichan_importer = { git = "https://github.com/aramrw/importer", features = ["rayon"] }
 //! ```
 //!
 //! ```no_run
-//! use importer::import_dictionary;
+//! use yomichan_importer::import_dictionary;
 //!
 //! let path = std::path::Path::new("./dictionaries/kotobankesjp");
 //! let data = import_dictionary(path).unwrap();
