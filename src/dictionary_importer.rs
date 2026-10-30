@@ -541,6 +541,10 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
         &mut term_bank_paths,
     )?;
 
+    let styles = index_path
+        .parent()
+        .and_then(|dir| fs::read_to_string(dir.join("styles.css")).ok())
+        .unwrap_or_default();
     let index = YomichanIndexFile::convert_index_file(index_path)?;
     let dict_name = index.title.clone();
 
@@ -621,8 +625,7 @@ pub fn prepare_dictionary<P: AsRef<Path>>(
     let summary_details = SummaryDetails {
         prefix_wildcard_supported: false,
         counts,
-        // TODO: need to parse 'styles.css' file if it exists
-        styles: "".to_string(),
+        styles,
         yomitan_version,
     };
     let summary = DictionarySummary::new(index, false, summary_details)?;

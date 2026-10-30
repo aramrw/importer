@@ -80,14 +80,13 @@ impl<'de> Deserialize<'de> for ContentMatchType {
             {
                 let mut tag = None;
                 let mut ty = None;
-                let mut content = None;
-                let mut buffered_fields = serde_json::Map::new();
+                let mut buffered_fields: IndexMap<CompactString, Value> = IndexMap::new();
 
                 while let Some(key) = map.next_key::<CompactString>()? {
                     match key.as_str() {
                         "tag" => {
                             let t: HtmlTag = map.next_value()?;
-                            if buffered_fields.is_empty() {
+                            if buffered_fields.is_empty() && ty.is_none() {
                                 // Fast path: nothing buffered yet
                                 return Ok(ContentMatchType::Element(Box::new(
                                     Element::deserialize_from_map(t, map)?,
@@ -97,8 +96,9 @@ impl<'de> Deserialize<'de> for ContentMatchType {
                         }
                         "type" => {
                             let t: CompactString = map.next_value()?;
-                            if t == "structured-content" && buffered_fields.is_empty() {
+                            if t == "structured-content" && buffered_fields.is_empty() && tag.is_none() {
                                 // Fast path for structured-content
+                                let mut content = None;
                                 while let Some(k) = map.next_key::<CompactString>()? {
                                     if k == "content" {
                                         content = Some(map.next_value()?);
@@ -123,11 +123,8 @@ impl<'de> Deserialize<'de> for ContentMatchType {
                             }
                             ty = Some(t);
                         }
-                        "content" => {
-                            content = Some(map.next_value()?);
-                        }
                         _ => {
-                            buffered_fields.insert(key.to_string(), map.next_value()?);
+                            buffered_fields.insert(key, map.next_value()?);
                         }
                     }
                     if tag.is_some() || ty.is_some() {
@@ -137,11 +134,10 @@ impl<'de> Deserialize<'de> for ContentMatchType {
 
                 // If we are here, we either found tag/type late, or we finished the map.
                 // Continue consuming if not finished.
-                while let Some(key) = map.next_key::<String>()? {
+                while let Some(key) = map.next_key::<CompactString>()? {
                     match key.as_str() {
                         "tag" => tag = tag.or(Some(map.next_value()?)),
                         "type" => ty = ty.or(Some(map.next_value()?)),
-                        "content" => content = content.or(Some(map.next_value()?)),
                         _ => {
                             buffered_fields.insert(key, map.next_value()?);
                         }
@@ -150,66 +146,15 @@ impl<'de> Deserialize<'de> for ContentMatchType {
 
                 // Handle what we found
                 if let Some(t) = tag {
-                    let mut fields = buffered_fields;
-                    if let Some(c) = content {
-                        fields.insert(
-                            "content".to_string(),
-                            serde_json::to_value(c).map_err(de::Error::custom)?,
-                        );
-                    }
-                    if let Some(t_val) = ty {
-                        fields.insert("type".to_string(), Value::String(t_val.to_string()));
-                    }
-                    let value = Value::Object(fields);
-                    let tag_str: String = serde_json::to_value(t)
-                        .map_err(de::Error::custom)?
-                        .as_str()
-                        .unwrap()
-                        .to_string();
-
-                    let element = match t {
-                        HtmlTag::Anchor => Element::Link(
-                            LinkElement::deserialize_with_tag(tag_str, value)
-                                .map_err(de::Error::custom)?,
-                        ),
-                        HtmlTag::Div
-                        | HtmlTag::Span
-                        | HtmlTag::OrderedList
-                        | HtmlTag::UnorderedList
-                        | HtmlTag::ListItem
-                        | HtmlTag::Details
-                        | HtmlTag::Summary => Element::Styled(
-                            StyledElement::deserialize_with_tag(tag_str, value)
-                                .map_err(de::Error::custom)?,
-                        ),
-                        HtmlTag::Ruby
-                        | HtmlTag::RubyText
-                        | HtmlTag::RubyParenthesis
-                        | HtmlTag::Table
-                        | HtmlTag::Thead
-                        | HtmlTag::TableFooter
-                        | HtmlTag::TableBody
-                        | HtmlTag::TableRow
-                        | HtmlTag::TableGeneric => Element::Unstyled(
-                            UnstyledElement::deserialize_with_tag(tag_str, value)
-                                .map_err(de::Error::custom)?,
-                        ),
-                        HtmlTag::TableData | HtmlTag::TableHeader => Element::Table(
-                            TableElement::deserialize_with_tag(tag_str, value)
-                                .map_err(de::Error::custom)?,
-                        ),
-                        HtmlTag::Break => Element::LineBreak(
-                            LineBreak::deserialize_with_tag(tag_str, value)
-                                .map_err(de::Error::custom)?,
-                        ),
-                        HtmlTag::Img => Element::Image(
-                            ImageElement::deserialize_with_tag(tag_str, value)
-                                .map_err(de::Error::custom)?,
-                        ),
-                    };
+                    let element = Element::deserialize_from_buffered_map(t, buffered_fields)
+                        .map_err(de::Error::custom)?;
                     Ok(ContentMatchType::Element(Box::new(element)))
                 } else if ty.as_deref() == Some("structured-content") {
-                    let content = content.ok_or_else(|| de::Error::missing_field("content"))?;
+                    let content_val = buffered_fields
+                        .swap_remove("content")
+                        .ok_or_else(|| de::Error::missing_field("content"))?;
+                    let content: ContentMatchType =
+                        serde_json::from_value(content_val).map_err(de::Error::custom)?;
                     Ok(ContentMatchType::Element(Box::new(Element::Styled(
                         StyledElement {
                             tag: HtmlTag::Div,
@@ -234,18 +179,37 @@ impl<'de> Deserialize<'de> for ContentMatchType {
 }
 
 /// `yomichan_rs` unique struct.
-/// The entire definition node tree parsed and inserted with correct formatting
-/// in different ways for rendering.
+/// Stores the definition rendered as HTML, with on-demand zero-regex stripping
+/// to plain text via [`TermGlossaryContentGroup::to_plain_text`].
 ///
 /// # Fields
-/// * `plain_text: String` - Usable in all programs for simple rendering of definitions
-/// * `html: Option<String>` - Node tree parsed as html
+/// * `html: CompactString` - Node tree parsed as HTML
 #[derive(Clone, PartialEq, Serialize, Deserialize, Debug, Eq, Hash)]
 pub struct TermGlossaryContentGroup {
-    // this is used for programs that cannot render html
-    pub plain_text: CompactString,
-    // this is used for programs that can render html (we ignore it for now)
-    pub html: Option<CompactString>,
+    /// The definition rendered as HTML.
+    pub html: CompactString,
+}
+
+impl TermGlossaryContentGroup {
+    /// Returns the HTML representation of this definition.
+    #[inline]
+    pub fn as_html(&self) -> &str {
+        &self.html
+    }
+
+    /// Strips all HTML tags and unescapes HTML entities in a single pass,
+    /// preserving block newlines, list item bullets (`  - `), table cell tabs (`\t`),
+    /// and image `alt` / `[Image: path]` placeholders.
+    #[inline]
+    pub fn to_plain_text(&self) -> CompactString {
+        strip_html_to_plain_text(&self.html)
+    }
+
+    /// Alias for [`Self::to_plain_text`].
+    #[inline]
+    pub fn plain_text(&self) -> CompactString {
+        self.to_plain_text()
+    }
 }
 
 /// The type of a term glossary group.
@@ -272,32 +236,490 @@ impl From<TermGlossary> for TermGlossaryGroupType {
     fn from(value: TermGlossary) -> Self {
         match value {
             TermGlossary::Deinflection(d) => Self::Deinflection(d),
-            TermGlossary::Content(_) => {
-                let plain_text = match value {
-                    TermGlossary::Content(ref c) => c.to_plain_text(),
-                    _ => unreachable!(),
-                };
-                let group = TermGlossaryContentGroup {
-                    plain_text: plain_text.into(),
-                    html: None,
-                };
-                Self::Content(group)
-            }
+            TermGlossary::Content(c) => Self::Content(TermGlossaryContentGroup::from(c)),
         }
     }
 }
 
 impl From<TermGlossaryContent> for TermGlossaryContentGroup {
     fn from(value: TermGlossaryContent) -> Self {
-        let plain_text = value.to_plain_text();
         Self {
-            plain_text: plain_text.into(),
-            html: None,
+            html: value.to_html(),
+        }
+    }
+}
+
+/// Fast single-pass HTML-to-plain-text converter for rendered definitions.
+/// Preserves block-level line breaks, `<br>`, `<li>` bullets (`  - `),
+/// `<td>`/`<th>` cell tabs (`\t`), `<img alt="..." src="...">` text, and unescapes HTML entities.
+pub fn strip_html_to_plain_text(html: &str) -> CompactString {
+    let mut buffer = CompactString::with_capacity(html.len());
+    let bytes = html.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        match bytes[i] {
+            b'<' => {
+                if let Some(rel_end) = bytes[i + 1..].iter().position(|&b| b == b'>') {
+                    let tag_end = i + 1 + rel_end;
+                    let tag_inner = &html[i + 1..tag_end];
+                    handle_html_tag_for_plain_text(tag_inner, &mut buffer);
+                    i = tag_end + 1;
+                } else {
+                    // Malformed '<' with no closing '>'
+                    buffer.push('<');
+                    i += 1;
+                }
+            }
+            b'&' => {
+                if let Some((unescaped, consumed)) = decode_html_entity(&html[i..]) {
+                    buffer.push_str(&unescaped);
+                    i += consumed;
+                } else {
+                    buffer.push('&');
+                    i += 1;
+                }
+            }
+            _ => {
+                let start = i;
+                i += 1;
+                while i < len && bytes[i] != b'<' && bytes[i] != b'&' {
+                    i += 1;
+                }
+                buffer.push_str(&html[start..i]);
+            }
+        }
+    }
+
+    buffer.trim().to_compact_string()
+}
+
+#[inline]
+fn handle_html_tag_for_plain_text(tag_inner: &str, buffer: &mut CompactString) {
+    let trimmed = tag_inner.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+
+    let (is_closing, rest) = if let Some(stripped) = trimmed.strip_prefix('/') {
+        (true, stripped.trim_start())
+    } else {
+        (false, trimmed)
+    };
+
+    let tag_name_end = rest
+        .find(|c: char| c.is_ascii_whitespace() || c == '/')
+        .unwrap_or(rest.len());
+    let tag_name = &rest[..tag_name_end];
+
+    if tag_name.eq_ignore_ascii_case("br") {
+        if !buffer.is_empty() {
+            buffer.push('\n');
+        }
+        return;
+    }
+
+    if !is_closing && tag_name.eq_ignore_ascii_case("img") {
+        if let Some(alt) = extract_html_attr(rest, "alt") {
+            buffer.push_str(&alt);
+        } else if let Some(src) = extract_html_attr(rest, "src") {
+            buffer.push_str("[Image: ");
+            buffer.push_str(&src);
+            buffer.push(']');
+        }
+        return;
+    }
+
+    let is_block = tag_name.eq_ignore_ascii_case("div")
+        || tag_name.eq_ignore_ascii_case("ol")
+        || tag_name.eq_ignore_ascii_case("ul")
+        || tag_name.eq_ignore_ascii_case("li")
+        || tag_name.eq_ignore_ascii_case("details")
+        || tag_name.eq_ignore_ascii_case("tr")
+        || tag_name.eq_ignore_ascii_case("table");
+
+    if !is_closing {
+        if is_block && !buffer.is_empty() && !buffer.ends_with('\n') {
+            buffer.push('\n');
+        }
+        if tag_name.eq_ignore_ascii_case("li") {
+            buffer.push_str("  - ");
+        }
+    } else {
+        if tag_name.eq_ignore_ascii_case("td") || tag_name.eq_ignore_ascii_case("th") {
+            buffer.push('\t');
+        }
+        if is_block && !buffer.is_empty() && !buffer.ends_with('\n') {
+            buffer.push('\n');
+        }
+    }
+}
+
+fn extract_html_attr(tag_content: &str, attr_name: &str) -> Option<CompactString> {
+    let mut rest = tag_content;
+    while let Some(idx) = rest.find('=') {
+        let before = rest[..idx].trim_end();
+        let name_start = before
+            .rfind(|c: char| c.is_ascii_whitespace())
+            .map(|p| p + 1)
+            .unwrap_or(0);
+        let candidate = &before[name_start..];
+        let after_eq = rest[idx + 1..].trim_start();
+
+        if let Some(quote) = after_eq.chars().next() {
+            if quote == '"' || quote == '\'' {
+                let value_Part = &after_eq[1..];
+                if let Some(end_quote) = value_Part.find(quote) {
+                    if candidate.eq_ignore_ascii_case(attr_name) {
+                        return Some(unescape_html_str(&value_Part[..end_quote]));
+                    }
+                    rest = &value_Part[end_quote + 1..];
+                    continue;
+                }
+            }
+        }
+        rest = &rest[idx + 1..];
+    }
+    None
+}
+
+fn unescape_html_str(s: &str) -> CompactString {
+    if !s.contains('&') {
+        return CompactString::from(s);
+    }
+    let mut out = CompactString::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'&' {
+            if let Some((decoded, consumed)) = decode_html_entity(&s[i..]) {
+                out.push_str(&decoded);
+                i += consumed;
+                continue;
+            }
+        }
+        let ch = s[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+#[inline]
+fn decode_html_entity(s: &str) -> Option<(CompactString, usize)> {
+    let semi = s.as_bytes().iter().take(12).position(|&b| b == b';')?;
+    let entity = &s[1..semi];
+    let consumed = semi + 1;
+    let decoded = match entity {
+        "amp" => CompactString::const_new("&"),
+        "lt" => CompactString::const_new("<"),
+        "gt" => CompactString::const_new(">"),
+        "quot" => CompactString::const_new("\""),
+        "apos" | "#39" | "#x27" | "#X27" => CompactString::const_new("'"),
+        "nbsp" | "#160" | "#xa0" | "#xA0" => CompactString::const_new("\u{00A0}"),
+        _ if entity.starts_with("#x") || entity.starts_with("#X") => {
+            let code = u32::from_str_radix(&entity[2..], 16).ok()?;
+            let ch = char::from_u32(code)?;
+            let mut cs = CompactString::default();
+            cs.push(ch);
+            cs
+        }
+        _ if entity.starts_with('#') => {
+            let code = entity[1..].parse::<u32>().ok()?;
+            let ch = char::from_u32(code)?;
+            let mut cs = CompactString::default();
+            cs.push(ch);
+            cs
+        }
+        _ => return None,
+    };
+    Some((decoded, consumed))
+}
+
+#[inline]
+fn push_escaped_html_text(buffer: &mut CompactString, text: &str) {
+    let bytes = text.as_bytes();
+    let mut last = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        let replacement = match b {
+            b'&' => "&amp;",
+            b'<' => "&lt;",
+            b'>' => "&gt;",
+            b'\n' => "<br>",
+            _ => continue,
+        };
+        if last < i {
+            buffer.push_str(&text[last..i]);
+        }
+        buffer.push_str(replacement);
+        last = i + 1;
+    }
+    if last < bytes.len() {
+        buffer.push_str(&text[last..]);
+    }
+}
+
+#[inline]
+fn push_escaped_html_attr(buffer: &mut CompactString, val: &str) {
+    let bytes = val.as_bytes();
+    let mut last = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        let replacement = match b {
+            b'&' => "&amp;",
+            b'<' => "&lt;",
+            b'>' => "&gt;",
+            b'"' => "&quot;",
+            b'\'' => "&#39;",
+            _ => continue,
+        };
+        if last < i {
+            buffer.push_str(&val[last..i]);
+        }
+        buffer.push_str(replacement);
+        last = i + 1;
+    }
+    if last < bytes.len() {
+        buffer.push_str(&val[last..]);
+    }
+}
+
+#[inline]
+fn push_data_attributes(
+    buffer: &mut CompactString,
+    data: &Option<IndexMap<CompactString, CompactString>>,
+) {
+    if let Some(map) = data {
+        for (k, v) in map {
+            buffer.push_str(" data-sc-");
+            for ch in k.chars() {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    buffer.push(ch.to_ascii_lowercase());
+                }
+            }
+            buffer.push_str("=\"");
+            push_escaped_html_attr(buffer, v);
+            buffer.push('"');
         }
     }
 }
 
 impl TermGlossaryContent {
+    /// Renders the structured content tree into an HTML string.
+    pub fn to_html(&self) -> CompactString {
+        let mut buffer = CompactString::default();
+        match self {
+            Self::String(s) => {
+                push_escaped_html_text(&mut buffer, s.trim());
+            }
+            Self::Tagged(tagged_content) => {
+                Self::render_tagged_content_html(tagged_content, &mut buffer);
+            }
+        }
+        buffer
+    }
+
+    fn render_tagged_content_html(tagged: &TaggedContent, buffer: &mut CompactString) {
+        match tagged {
+            TaggedContent::Text { text } => {
+                push_escaped_html_text(buffer, text.trim());
+            }
+            TaggedContent::Image(image_element) => {
+                Self::render_image_html(image_element, buffer);
+            }
+            TaggedContent::StructuredContent { content } => {
+                Self::render_content_match_type_html(content, buffer);
+            }
+        }
+    }
+
+    fn render_content_match_type_html(content: &ContentMatchType, buffer: &mut CompactString) {
+        match content {
+            ContentMatchType::String(s) => {
+                push_escaped_html_text(buffer, s);
+            }
+            ContentMatchType::Content(vec) => {
+                for item in vec {
+                    Self::render_content_match_type_html(item, buffer);
+                }
+            }
+            ContentMatchType::Element(element) => {
+                Self::render_element_html(element, buffer);
+            }
+        }
+    }
+
+    fn render_element_html(element: &Element, buffer: &mut CompactString) {
+        match element {
+            Element::UnknownString(s) => {
+                push_escaped_html_text(buffer, s);
+            }
+            Element::LineBreak(lb) => {
+                buffer.push_str("<br");
+                push_data_attributes(buffer, &lb.data);
+                buffer.push('>');
+            }
+            Element::Link(link) => {
+                buffer.push_str("<a href=\"");
+                push_escaped_html_attr(buffer, &link.href);
+                buffer.push('"');
+                if let Some(lang) = &link.lang {
+                    buffer.push_str(" lang=\"");
+                    push_escaped_html_attr(buffer, lang);
+                    buffer.push('"');
+                }
+                buffer.push('>');
+                if let Some(content) = &link.content {
+                    Self::render_content_match_type_html(content, buffer);
+                }
+                buffer.push_str("</a>");
+            }
+            Element::Styled(styled) => {
+                let tag_str = styled.tag.as_html_str();
+                buffer.push('<');
+                buffer.push_str(tag_str);
+                if styled.open == Some(true) {
+                    buffer.push_str(" open");
+                }
+                if let Some(title) = &styled.title {
+                    buffer.push_str(" title=\"");
+                    push_escaped_html_attr(buffer, title);
+                    buffer.push('"');
+                }
+                if let Some(lang) = &styled.lang {
+                    buffer.push_str(" lang=\"");
+                    push_escaped_html_attr(buffer, lang);
+                    buffer.push('"');
+                }
+                push_data_attributes(buffer, &styled.data);
+                if let Some(style) = &styled.style {
+                    style.push_style_attr(buffer);
+                }
+                buffer.push('>');
+                if let Some(content) = &styled.content {
+                    Self::render_content_match_type_html(content, buffer);
+                }
+                buffer.push_str("</");
+                buffer.push_str(tag_str);
+                buffer.push('>');
+            }
+            Element::Unstyled(unstyled) => {
+                let tag_str = unstyled.tag.as_html_str();
+                buffer.push('<');
+                buffer.push_str(tag_str);
+                if let Some(lang) = &unstyled.lang {
+                    buffer.push_str(" lang=\"");
+                    push_escaped_html_attr(buffer, lang);
+                    buffer.push('"');
+                }
+                push_data_attributes(buffer, &unstyled.data);
+                buffer.push('>');
+                if let Some(content) = &unstyled.content {
+                    Self::render_content_match_type_html(content, buffer);
+                }
+                buffer.push_str("</");
+                buffer.push_str(tag_str);
+                buffer.push('>');
+            }
+            Element::Table(table) => {
+                let tag_str = table.tag.as_html_str();
+                buffer.push('<');
+                buffer.push_str(tag_str);
+                if let Some(col_span) = table.col_span {
+                    use std::fmt::Write;
+                    let _ = write!(buffer, " colspan=\"{}\"", col_span);
+                }
+                if let Some(row_span) = table.row_span {
+                    use std::fmt::Write;
+                    let _ = write!(buffer, " rowspan=\"{}\"", row_span);
+                }
+                if let Some(lang) = &table.lang {
+                    buffer.push_str(" lang=\"");
+                    push_escaped_html_attr(buffer, lang);
+                    buffer.push('"');
+                }
+                push_data_attributes(buffer, &table.data);
+                if let Some(style) = &table.style {
+                    style.push_style_attr(buffer);
+                }
+                buffer.push('>');
+                if let Some(content) = &table.content {
+                    Self::render_content_match_type_html(content, buffer);
+                }
+                buffer.push_str("</");
+                buffer.push_str(tag_str);
+                buffer.push('>');
+            }
+            Element::Image(img) => {
+                Self::render_image_html(img, buffer);
+            }
+        }
+    }
+
+    fn render_image_html(img: &ImageElement, buffer: &mut CompactString) {
+        use std::fmt::Write;
+        buffer.push_str("<img src=\"");
+        push_escaped_html_attr(buffer, &img.path);
+        buffer.push('"');
+        if let Some(alt) = &img.alt {
+            buffer.push_str(" alt=\"");
+            push_escaped_html_attr(buffer, alt);
+            buffer.push('"');
+        }
+        if let Some(title) = &img.title {
+            buffer.push_str(" title=\"");
+            push_escaped_html_attr(buffer, title);
+            buffer.push('"');
+        }
+        push_data_attributes(buffer, &img.data);
+
+        let unit = match img.size_units {
+            Some(SizeUnits::Em) => "em",
+            Some(SizeUnits::Px) | None => "px",
+        };
+        let has_style = img.width.is_some()
+            || img.height.is_some()
+            || img.vertical_align.is_some()
+            || img.border.is_some()
+            || img.border_radius.is_some()
+            || img.image_rendering.is_some()
+            || img.pixelated == Some(true);
+
+        if has_style {
+            buffer.push_str(" style=\"");
+            if let Some(w) = img.width {
+                let _ = write!(buffer, "width:{}{};", w, unit);
+            }
+            if let Some(h) = img.height {
+                let _ = write!(buffer, "height:{}{};", h, unit);
+            }
+            if let Some(va) = img.vertical_align {
+                buffer.push_str("vertical-align:");
+                buffer.push_str(va.as_css_str());
+                buffer.push(';');
+            }
+            if let Some(border) = &img.border {
+                buffer.push_str("border:");
+                push_escaped_html_attr(buffer, border);
+                buffer.push(';');
+            }
+            if let Some(br) = &img.border_radius {
+                buffer.push_str("border-radius:");
+                push_escaped_html_attr(buffer, br);
+                buffer.push(';');
+            }
+            if let Some(ir) = img.image_rendering {
+                buffer.push_str("image-rendering:");
+                buffer.push_str(ir.as_css_str());
+                buffer.push(';');
+            } else if img.pixelated == Some(true) {
+                buffer.push_str("image-rendering:pixelated;");
+            }
+            buffer.push('"');
+        }
+        buffer.push('>');
+    }
+
     pub fn to_plain_text(&self) -> CompactString {
         let mut buffer = CompactString::default();
         match self {
@@ -855,7 +1277,288 @@ pub struct StructuredContentStyle {
     list_style_type: Option<CompactString>,
 }
 
-// daijisen: ~6.35s WITHOUT custom deserialization.
+impl ImageRendering {
+    #[inline]
+    pub const fn as_css_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Pixelated => "pixelated",
+            Self::CrispEdges => "crisp-edges",
+        }
+    }
+}
+
+impl HtmlTag {
+    #[inline]
+    pub const fn as_html_str(self) -> &'static str {
+        match self {
+            Self::Ruby => "ruby",
+            Self::RubyText => "rt",
+            Self::RubyParenthesis => "rp",
+            Self::Table | Self::TableGeneric => "table",
+            Self::Thead => "thead",
+            Self::TableBody => "tbody",
+            Self::TableFooter => "tfoot",
+            Self::TableRow => "tr",
+            Self::TableData => "td",
+            Self::TableHeader => "th",
+            Self::Anchor => "a",
+            Self::Span => "span",
+            Self::Div => "div",
+            Self::OrderedList => "ol",
+            Self::UnorderedList => "ul",
+            Self::ListItem => "li",
+            Self::Details => "details",
+            Self::Summary => "summary",
+            Self::Break => "br",
+            Self::Img => "img",
+        }
+    }
+}
+
+impl VerticalAlign {
+    #[inline]
+    pub const fn as_css_str(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Sub => "sub",
+            Self::Super => "super",
+            Self::TextTop => "text-top",
+            Self::TextBottom => "text-bottom",
+            Self::Middle => "middle",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+        }
+    }
+}
+
+impl TextDecorationLine {
+    #[inline]
+    pub const fn as_css_str(self) -> &'static str {
+        match self {
+            Self::Underline => "underline",
+            Self::Overline => "overline",
+            Self::LineThrough => "line-through",
+        }
+    }
+}
+
+impl TextDecorationLineOrNone {
+    #[inline]
+    pub const fn as_css_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::TextDecorationLine(line) => line.as_css_str(),
+        }
+    }
+}
+
+impl TextDecorationStyle {
+    #[inline]
+    pub const fn as_css_str(&self) -> &'static str {
+        match self {
+            Self::Solid => "solid",
+            Self::Double => "double",
+            Self::Dotted => "dotted",
+            Self::Dashed => "dashed",
+            Self::Wavy => "wavy",
+        }
+    }
+}
+
+impl FontStyle {
+    #[inline]
+    pub const fn as_css_str(&self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Italic => "italic",
+        }
+    }
+}
+
+impl FontWeight {
+    #[inline]
+    pub const fn as_css_str(&self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Bold => "bold",
+        }
+    }
+}
+
+impl WordBreak {
+    #[inline]
+    pub const fn as_css_str(&self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::BreakAll => "break-all",
+            Self::KeepAll => "keep-all",
+        }
+    }
+}
+
+impl TextAlign {
+    #[inline]
+    pub const fn as_css_str(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::End => "end",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Center => "center",
+            Self::Justify => "justify",
+            Self::JustifyAll => "justify-all",
+            Self::MatchParent => "match-parent",
+        }
+    }
+}
+
+impl NumberOrString {
+    #[inline]
+    fn push_css_length(&self, buffer: &mut CompactString) {
+        use std::fmt::Write;
+        match self {
+            Self::Number(n) => {
+                if *n == 0.0 {
+                    buffer.push('0');
+                } else {
+                    let _ = write!(buffer, "{}em", n);
+                }
+            }
+            Self::String(s) => {
+                push_escaped_html_attr(buffer, s);
+            }
+        }
+    }
+}
+
+impl StructuredContentStyle {
+    /// Appends ` style="..."` to `buffer` if any style property is set.
+    pub fn push_style_attr(&self, buffer: &mut CompactString) {
+        let start_len = buffer.len();
+        buffer.push_str(" style=\"");
+        let attr_prefix_len = buffer.len();
+
+        #[inline]
+        fn push_prop(buffer: &mut CompactString, key: &str, val: &str) {
+            buffer.push_str(key);
+            buffer.push(':');
+            push_escaped_html_attr(buffer, val);
+            buffer.push(';');
+        }
+
+        #[inline]
+        fn push_len_prop(buffer: &mut CompactString, key: &str, val: &NumberOrString) {
+            buffer.push_str(key);
+            buffer.push(':');
+            val.push_css_length(buffer);
+            buffer.push(';');
+        }
+
+        if let Some(v) = &self.font_style {
+            push_prop(buffer, "font-style", v.as_css_str());
+        }
+        if let Some(v) = &self.font_weight {
+            push_prop(buffer, "font-weight", v.as_css_str());
+        }
+        if let Some(v) = &self.font_size {
+            push_prop(buffer, "font-size", v);
+        }
+        if let Some(v) = &self.color {
+            push_prop(buffer, "color", v);
+        }
+        if let Some(v) = &self.background {
+            push_prop(buffer, "background", v);
+        }
+        if let Some(v) = &self.background_color {
+            push_prop(buffer, "background-color", v);
+        }
+        if let Some(v) = &self.text_decoration_line {
+            push_prop(buffer, "text-decoration-line", v.as_css_str());
+        }
+        if let Some(v) = &self.text_decoration_style {
+            push_prop(buffer, "text-decoration-style", v.as_css_str());
+        }
+        if let Some(v) = &self.text_decoration_color {
+            push_prop(buffer, "text-decoration-color", v);
+        }
+        if let Some(v) = &self.border_color {
+            push_prop(buffer, "border-color", v);
+        }
+        if let Some(v) = &self.border_style {
+            push_prop(buffer, "border-style", v);
+        }
+        if let Some(v) = &self.border_radius {
+            push_prop(buffer, "border-radius", v);
+        }
+        if let Some(v) = &self.border_width {
+            push_prop(buffer, "border-width", v);
+        }
+        if let Some(v) = &self.clip_path {
+            push_prop(buffer, "clip-path", v);
+        }
+        if let Some(v) = &self.vertical_align {
+            push_prop(buffer, "vertical-align", v.as_css_str());
+        }
+        if let Some(v) = &self.text_align {
+            push_prop(buffer, "text-align", v.as_css_str());
+        }
+        if let Some(v) = &self.text_emphasis {
+            push_prop(buffer, "text-emphasis", v);
+        }
+        if let Some(v) = &self.text_shadow {
+            push_prop(buffer, "text-shadow", v);
+        }
+        if let Some(v) = &self.margin {
+            push_len_prop(buffer, "margin", v);
+        }
+        if let Some(v) = &self.margin_top {
+            push_len_prop(buffer, "margin-top", v);
+        }
+        if let Some(v) = &self.margin_left {
+            push_len_prop(buffer, "margin-left", v);
+        }
+        if let Some(v) = &self.margin_right {
+            push_len_prop(buffer, "margin-right", v);
+        }
+        if let Some(v) = &self.margin_bottom {
+            push_len_prop(buffer, "margin-bottom", v);
+        }
+        if let Some(v) = &self.padding {
+            push_len_prop(buffer, "padding", v);
+        }
+        if let Some(v) = &self.padding_top {
+            push_len_prop(buffer, "padding-top", v);
+        }
+        if let Some(v) = &self.padding_left {
+            push_len_prop(buffer, "padding-left", v);
+        }
+        if let Some(v) = &self.padding_right {
+            push_len_prop(buffer, "padding-right", v);
+        }
+        if let Some(v) = &self.padding_bottom {
+            push_len_prop(buffer, "padding-bottom", v);
+        }
+        if let Some(v) = &self.word_break {
+            push_prop(buffer, "word-break", v.as_css_str());
+        }
+        if let Some(v) = &self.white_space {
+            push_prop(buffer, "white-space", v);
+        }
+        if let Some(v) = &self.cursor {
+            push_prop(buffer, "cursor", v);
+        }
+        if let Some(v) = &self.list_style_type {
+            push_prop(buffer, "list-style-type", v);
+        }
+
+        if buffer.len() == attr_prefix_len {
+            buffer.truncate(start_len);
+        } else {
+            buffer.push('"');
+        }
+    }
+}
 // daijisen: ~7.13 WITH custom deserialization.
 
 struct ElementVisitor;
@@ -2559,5 +3262,76 @@ mod tests {
         } else {
             panic!("Expected Element variant");
         }
+    }
+
+    #[test]
+    fn test_html_rendering_and_plain_text_stripping() {
+        let json_sc = json!({
+            "type": "structured-content",
+            "content": [
+                {
+                    "tag": "div",
+                    "data": { "content": "header" },
+                    "style": { "fontWeight": "bold", "color": "#ff0000", "marginLeft": 0.5 },
+                    "content": "見出し <1> & \"quote\""
+                },
+                {
+                    "tag": "ul",
+                    "content": [
+                        { "tag": "li", "content": "項目A" },
+                        { "tag": "li", "content": ["項目B: ", { "tag": "a", "href": "?query=test&mode=exact", "content": "リンク" }] }
+                    ]
+                },
+                {
+                    "tag": "table",
+                    "content": [
+                        {
+                            "tag": "tr",
+                            "content": [
+                                { "tag": "th", "colSpan": 2, "content": "表題" }
+                            ]
+                        },
+                        {
+                            "tag": "tr",
+                            "content": [
+                                { "tag": "td", "content": "セル1" },
+                                { "tag": "td", "content": "セル2" }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "tag": "img",
+                    "path": "images/diagram.png",
+                    "width": 100.0,
+                    "height": 50.0,
+                    "sizeUnits": "px"
+                }
+            ]
+        });
+
+        let glossary_content: TermGlossaryContent = serde_json::from_value(json_sc).unwrap();
+        let expected_plain = glossary_content.to_plain_text();
+        let group = TermGlossaryContentGroup::from(glossary_content);
+
+        assert_eq!(
+            group.as_html(),
+            "<div data-sc-content=\"header\" style=\"font-weight:bold;color:#ff0000;margin-left:0.5em;\">見出し &lt;1&gt; &amp; \"quote\"</div>\
+             <ul><li>項目A</li><li>項目B: <a href=\"?query=test&amp;mode=exact\">リンク</a></li></ul>\
+             <table><tr><th colspan=\"2\">表題</th></tr><tr><td>セル1</td><td>セル2</td></tr></table>\
+             <img src=\"images/diagram.png\" style=\"width:100px;height:50px;\">"
+        );
+
+        let stripped_plain = group.to_plain_text();
+        assert_eq!(stripped_plain, expected_plain);
+    }
+
+    #[test]
+    fn test_plain_string_glossary_html_and_roundtrip() {
+        let raw = TermGlossaryContent::String("行1 <test> & more\n行2".into());
+        let expected_plain = raw.to_plain_text();
+        let group = TermGlossaryContentGroup::from(raw);
+        assert_eq!(group.as_html(), "行1 &lt;test&gt; &amp; more<br>行2");
+        assert_eq!(group.to_plain_text(), expected_plain);
     }
 }
